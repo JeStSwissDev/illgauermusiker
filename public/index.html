@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Musikarchiv Illgau</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 900px; margin: 24px auto; padding: 0 16px; }
+    .card { border: 1px solid #ddd; border-radius: 12px; padding: 16px; margin: 12px 0; }
+    img { max-width: 320px; border-radius: 12px; }
+    a { text-decoration: none; }
+    ul { margin: 8px 0 0 18px; }
+    .muted { color: #666; }
+  </style>
+</head>
+<body>
+  <h1>Musikarchiv Illgau</h1>
+  <p class="muted">Aufruf via URL: <code>?type=musiker&id=1</code> oder <code>?type=formation&id=1</code></p>
+  <div id="content" class="card">Lade…</div>
+
+<script>
+  const params = new URLSearchParams(location.search);
+  const type = params.get("type");
+  const id = params.get("id");
+
+  function linkTo(t, i, label) {
+    return `<a href="/?type=${encodeURIComponent(t)}&id=${encodeURIComponent(i)}">${label}</a>`;
+  }
+
+  async function load() {
+    if (!type || !id) {
+      document.getElementById("content").innerHTML = `
+        <h2>Start</h2>
+        <p>Bitte per QR/URL mit <code>type</code> und <code>id</code> aufrufen.</p>
+        <p>Beispiel: <a href="/?type=musiker&id=1">Musiker 1</a></p>
+      `;
+      return;
+    }
+
+    const res = await fetch(`/api/${type}/${id}`);
+    const data = await res.json();
+
+    if (!res.ok) {
+      document.getElementById("content").innerHTML = `<h2>Fehler</h2><pre>${JSON.stringify(data, null, 2)}</pre>`;
+      return;
+    }
+
+    if (type === "musiker") {
+      const name = `${data.vorname} ${data.nachname}`;
+      document.getElementById("content").innerHTML = `
+        <h2>${name}</h2>
+        ${data.foto_path ? `<img src="/${data.foto_path}" alt="${name}">` : ""}
+        ${data.biografie ? `<p>${escapeHtml(data.biografie)}</p>` : ""}
+        <p><strong>Geburtsdatum:</strong> ${data.geburtsdatum}</p>
+        ${data.todesdatum ? `<p><strong>Todesdatum:</strong> ${data.todesdatum}</p>` : ""}
+
+        <div class="card">
+          <h3>Instrumente</h3>
+          ${data.instrumente?.length ? `<ul>${data.instrumente.map(i => `<li>${escapeHtml(i.name)}</li>`).join("")}</ul>` : "<p class='muted'>Keine erfasst</p>"}
+        </div>
+
+        <div class="card">
+          <h3>Formationen</h3>
+          ${data.formationen?.length ? `<ul>${data.formationen.map(f => `<li>${linkTo("formation", f.id, escapeHtml(f.name))} <span class="muted">(${f.eintrittsdatum}${f.austrittsdatum ? " – " + f.austrittsdatum : " – aktiv"})</span></li>`).join("")}</ul>` : "<p class='muted'>Keine erfasst</p>"}
+        </div>
+
+        <div class="card">
+          <h3>Macht Musik mit ${name}</h3>
+          ${data.machtMusikMit?.length ? `<ul>${data.machtMusikMit.map(m => `<li>${linkTo("musiker", m.id, escapeHtml(m.vorname + " " + m.nachname))}</li>`).join("")}</ul>` : "<p class='muted'>Keine Einträge</p>"}
+        </div>
+      `;
+    }
+
+    if (type === "formation") {
+      const name = data.name;
+      document.getElementById("content").innerHTML = `
+        <h2>${escapeHtml(name)}</h2>
+        ${data.foto_path ? `<img src="/${data.foto_path}" alt="${escapeHtml(name)}">` : ""}
+        ${data.biografie ? `<p>${escapeHtml(data.biografie)}</p>` : ""}
+        <p><strong>Gründung:</strong> ${data.gruendungsdatum}</p>
+        ${data.aufloesungsdatum ? `<p><strong>Auflösung:</strong> ${data.aufloesungsdatum}</p>` : ""}
+
+        ${data.mp3_path ? `<audio controls src="/${data.mp3_path}" style="width:100%"></audio>` : ""}
+
+        <div class="card">
+          <h3>Genres</h3>
+          ${data.genres?.length ? `<ul>${data.genres.map(g => `<li>${escapeHtml(g.name)}</li>`).join("")}</ul>` : "<p class='muted'>Keine erfasst</p>"}
+        </div>
+
+        <div class="card">
+          <h3>Mitglieder</h3>
+          ${data.mitglieder?.length ? `<ul>${data.mitglieder.map(m => `<li>${linkTo("musiker", m.id, escapeHtml(m.vorname + " " + m.nachname))} <span class="muted">(${m.eintrittsdatum}${m.austrittsdatum ? " – " + m.austrittsdatum : " – aktiv"})</span></li>`).join("")}</ul>` : "<p class='muted'>Keine erfasst</p>"}
+        </div>
+      `;
+    }
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  }
+
+  load();
+</script>
+</body>
+</html>
