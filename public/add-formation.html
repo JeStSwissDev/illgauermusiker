@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Formation erfassen</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 980px; margin: 24px auto; padding: 0 16px; }
+    .card { border:1px solid #ddd; border-radius: 12px; padding: 16px; margin: 12px 0; }
+    label { display:block; margin-top: 10px; }
+    input, textarea, select { width: 100%; padding: 8px; margin-top: 4px; }
+    .row { display:flex; gap: 10px; }
+    .row > * { flex:1; }
+    button { padding: 10px 12px; }
+    table { width:100%; border-collapse: collapse; }
+    th, td { border-bottom:1px solid #eee; padding: 8px; vertical-align: top; }
+    .muted { color:#666; }
+  </style>
+</head>
+<body>
+  <h1>Formation erfassen</h1>
+  <p class="muted"><a href="/">Zur Startseite</a></p>
+
+  <form id="form" class="card">
+    <label>Name *</label>
+    <input name="name" required />
+
+    <div class="row">
+      <div>
+        <label>Gründungsdatum *</label>
+        <input type="date" name="gruendungsdatum" required />
+      </div>
+      <div>
+        <label>Auflösungsdatum</label>
+        <input type="date" name="aufloesungsdatum" />
+      </div>
+    </div>
+
+    <label>Biografie</label>
+    <textarea name="biografie" rows="6"></textarea>
+
+    <label>Foto</label>
+    <input type="file" name="foto" accept="image/*" />
+
+    <label>MP3</label>
+    <input type="file" name="mp3" accept="audio/mpeg,audio/mp3" />
+
+    <div class="card">
+      <h2>Genres</h2>
+      <select id="genres" multiple size="8"></select>
+      <p class="muted">Mehrfachauswahl: Ctrl/Shift (Windows) / Cmd (Mac)</p>
+    </div>
+
+    <div class="card">
+      <h2>Mitglieder + Zeitraum</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Musiker</th>
+            <th>Eintritt *</th>
+            <th>Austritt</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="mitglieder"></tbody>
+      </table>
+      <button type="button" id="addMember">+ Musiker hinzufügen</button>
+    </div>
+
+    <button type="submit">Speichern</button>
+  </form>
+
+  <pre id="out" class="card"></pre>
+
+<script>
+  const out = document.getElementById("out");
+  const tb = document.getElementById("mitglieder");
+  const selGenres = document.getElementById("genres");
+  let musiker = [];
+
+  function esc(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+
+  async function loadLookups() {
+    musiker = await fetch("/api/lookups/musiker").then(r=>r.json());
+    const genres = await fetch("/api/lookups/genres").then(r=>r.json());
+
+    selGenres.innerHTML = genres.map(g => `<option value="${g.id}">${esc(g.name)}</option>`).join("");
+    addMemberRow();
+  }
+
+  function addMemberRow() {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td>
+        <select class="musiker">
+          <option value="">-- wählen --</option>
+          ${musiker.map(m => `<option value="${m.id}">${esc(m.nachname)}, ${esc(m.vorname)}</option>`).join("")}
+        </select>
+      </td>
+      <td><input type="date" class="eintritt" /></td>
+      <td><input type="date" class="austritt" /></td>
+      <td><button type="button" class="del">Entfernen</button></td>
+    `;
+    tr.querySelector(".del").addEventListener("click", () => tr.remove());
+    tb.appendChild(tr);
+  }
+
+  document.getElementById("addMember").addEventListener("click", addMemberRow);
+
+  document.getElementById("form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    out.textContent = "Sende…";
+
+    const fd = new FormData(e.target);
+
+    const genreIds = Array.from(selGenres.selectedOptions).map(o => Number(o.value));
+    fd.append("genre_ids", JSON.stringify(genreIds));
+
+    const members = Array.from(tb.querySelectorAll("tr")).map(tr => ({
+      musiker_id: tr.querySelector(".musiker").value ? Number(tr.querySelector(".musiker").value) : null,
+      eintrittsdatum: tr.querySelector(".eintritt").value || null,
+      austrittsdatum: tr.querySelector(".austritt").value || null,
+    })).filter(x => x.musiker_id && x.eintrittsdatum);
+
+    fd.append("mitglieder", JSON.stringify(members));
+
+    const resp = await fetch("/api/formation", { method: "POST", body: fd });
+    const json = await resp.json();
+    out.textContent = JSON.stringify(json, null, 2);
+
+    if (resp.ok && json?.formation?.id) {
+      const go = confirm("Erfolgreich gespeichert. Zur Formation-Ansicht wechseln?");
+      if (go) location.href = `/?type=formation&id=${json.formation.id}`;
+      else e.target.reset();
+    }
+  });
+
+  loadLookups();
+</script>
+</body>
+</html>

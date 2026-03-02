@@ -12,9 +12,17 @@
     ul { margin: 8px 0 0 18px; }
     .muted { color: #666; }
   </style>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 </head>
 <body>
   <h1>Musikarchiv Illgau</h1>
+  <button id="qrBtn" style="padding:10px 12px;">QR-Code anzeigen</button>
+<div id="qrWrap" class="card" style="display:none;">
+  <h3>QR-Code</h3>
+  <div id="qrcode"></div>
+  <p class="muted"><span id="qrUrl"></span></p>
+  <button id="qrClose" style="padding:10px 12px;">Schliessen</button>
+</div>
   <p class="muted">Aufruf via URL: <code>?type=musiker&id=1</code> oder <code>?type=formation&id=1</code></p>
   <div id="content" class="card">Lade…</div>
 
@@ -100,6 +108,29 @@
   }
 
   load();
+
+  const qrBtn = document.getElementById("qrBtn");
+const qrWrap = document.getElementById("qrWrap");
+const qrClose = document.getElementById("qrClose");
+const qrUrl = document.getElementById("qrUrl");
+const qrDiv = document.getElementById("qrcode");
+
+function showQr(url) {
+  qrDiv.innerHTML = "";
+  qrUrl.textContent = url;
+  qrWrap.style.display = "block";
+  // QRCode lib
+  new QRCode(qrDiv, { text: url, width: 220, height: 220 });
+}
+
+qrBtn?.addEventListener("click", () => {
+  // aktuelle Seite (inkl. type/id)
+  showQr(window.location.href);
+});
+
+qrClose?.addEventListener("click", () => {
+  qrWrap.style.display = "none";
+});
 </script>
 </body>
 </html>
