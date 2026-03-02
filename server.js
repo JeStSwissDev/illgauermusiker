@@ -9,6 +9,15 @@ import { fileURLToPath } from "url";
 
 dotenv.config();
 
+const APP_VERSION = process.env.APP_VERSION || "dev";
+const APP_STARTED_AT = new Date().toISOString();
+
+console.log("=================================");
+console.log("Musikarchiv gestartet");
+console.log("Version:", APP_VERSION);
+console.log("Startzeit:", APP_STARTED_AT);
+console.log("=================================");
+
 const app = express();
 app.use(cors());
 app.use(express.json());
@@ -80,6 +89,14 @@ const upload = multer({
   limits: {
     fileSize: 25 * 1024 * 1024, // 25MB
   },
+});
+
+// Version Handling
+app.get("/api/version", (req, res) => {
+  res.json({
+    version: APP_VERSION,
+    startedAt: APP_STARTED_AT,
+  });
 });
 
 // ---------- Health + Debug ----------
