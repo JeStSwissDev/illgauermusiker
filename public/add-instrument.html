@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Instrument erfassen</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 900px; margin: 24px auto; padding: 0 16px; }
+    .card { border:1px solid #ddd; border-radius: 12px; padding: 16px; margin: 12px 0; }
+    input { width: 100%; padding: 10px; margin-top: 6px; }
+    button { padding: 10px 12px; margin-top: 10px; }
+    ul { margin: 8px 0 0 18px; }
+    .muted { color:#666; }
+  </style>
+</head>
+<body>
+  <h1>Instrument erfassen</h1>
+  <p class="muted">
+    <a href="/">Startseite</a> · <a href="/add-musiker.html">Musiker erfassen</a>
+  </p>
+
+  <form id="form" class="card">
+    <label>Instrument-Name *</label>
+    <input name="name" required placeholder="z.B. Gesang, Gitarre, Klarinette..." />
+    <button type="submit">Speichern</button>
+  </form>
+
+  <pre id="out" class="card"></pre>
+
+  <div class="card">
+    <h2>Vorhandene Instrumente</h2>
+    <ul id="list"></ul>
+  </div>
+
+<script>
+  const out = document.getElementById("out");
+  const list = document.getElementById("list");
+
+  function esc(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+
+  async function refresh() {
+    const data = await fetch("/api/instrument").then(r => r.json());
+    list.innerHTML = data.length
+      ? data.map(i => `<li>#${i.id} – ${esc(i.name)}</li>`).join("")
+      : "<li class='muted'>Noch keine Instrumente erfasst</li>";
+  }
+
+  document.getElementById("form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    out.textContent = "Sende…";
+
+    const name = e.target.name.value.trim();
+    const resp = await fetch("/api/instrument", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name })
+    });
+
+    const json = await resp.json();
+    out.textContent = JSON.stringify(json, null, 2);
+
+    if (resp.ok) {
+      e.target.reset();
+      await refresh();
+      alert("Instrument gespeichert.");
+    }
+  });
+
+  refresh();
+</script>
+</body>
+</html>

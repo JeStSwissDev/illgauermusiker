@@ -125,6 +125,50 @@ app.get("/api/lookups/genres", async (req, res) => {
   res.json(rows);
 });
 
+// ---------- List Genres / Instrumente ----------
+app.get("/api/genre", async (req, res) => {
+  const [rows] = await pool.query("SELECT id, name FROM genre ORDER BY name");
+  res.json(rows);
+});
+
+app.get("/api/instrument", async (req, res) => {
+  const [rows] = await pool.query("SELECT id, name FROM instrument ORDER BY name");
+  res.json(rows);
+});
+
+// ---------- Create Genre ----------
+app.post("/api/genre", async (req, res) => {
+  try {
+    const name = String(req.body?.name || "").trim();
+    if (!name) return res.status(400).json({ ok: false, error: "name ist Pflicht" });
+
+    // UNIQUE(name) ist in deiner Tabelle schon drin -> Duplikate sauber behandeln
+    const [r] = await pool.query("INSERT INTO genre (name) VALUES (?)", [name]);
+    res.status(201).json({ ok: true, genre: { id: r.insertId, name } });
+  } catch (e) {
+    if (e?.code === "ER_DUP_ENTRY") {
+      return res.status(409).json({ ok: false, error: "Genre existiert bereits" });
+    }
+    res.status(500).json({ ok: false, message: e?.message, code: e?.code });
+  }
+});
+
+// ---------- Create Instrument ----------
+app.post("/api/instrument", async (req, res) => {
+  try {
+    const name = String(req.body?.name || "").trim();
+    if (!name) return res.status(400).json({ ok: false, error: "name ist Pflicht" });
+
+    const [r] = await pool.query("INSERT INTO instrument (name) VALUES (?)", [name]);
+    res.status(201).json({ ok: true, instrument: { id: r.insertId, name } });
+  } catch (e) {
+    if (e?.code === "ER_DUP_ENTRY") {
+      return res.status(409).json({ ok: false, error: "Instrument existiert bereits" });
+    }
+    res.status(500).json({ ok: false, message: e?.message, code: e?.code });
+  }
+});
+
 // ---------- GET Musiker ----------
 app.get("/api/musiker/:id", async (req, res) => {
   const id = Number(req.params.id);
