@@ -5,6 +5,7 @@ import mysql from "mysql2/promise";
 import multer from "multer";
 import fs from "fs";
 import path from "path";
+import { fileURLToPath } from "url";
 
 dotenv.config();
 
@@ -12,9 +13,14 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Static (index.html, uploads, formularseiten)
-app.use(express.static("public"));
+// --- __dirname for ESM (CRITICAL for hosting) ---
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
+// --- Static files (index.html, add-*.html, uploads/*) ---
+app.use(express.static(path.join(__dirname, "public")));
+
+// --- DB pool ---
 const pool = mysql.createPool({
   host: process.env.DB_HOST,
   port: process.env.DB_PORT ? Number(process.env.DB_PORT) : 3306,
@@ -29,31 +35,6 @@ const pool = mysql.createPool({
 const ensureDir = (p) => {
   if (!fs.existsSync(p)) fs.mkdirSync(p, { recursive: true });
 };
-
-const publicDir = path.resolve("public");
-const uploadsDir = path.join(publicDir, "uploads");
-const uploadsMusikerDir = path.join(uploadsDir, "musiker");
-const uploadsFormationDir = path.join(uploadsDir, "formation");
-const tmpDir = path.join(uploadsDir, "_tmp");
-
-ensureDir(uploadsMusikerDir);
-ensureDir(uploadsFormationDir);
-ensureDir(tmpDir);
-
-// Multer: erst in tmp speichern, danach nach <id> umbenennen
-const upload = multer({
-  storage: multer.diskStorage({
-    destination: (req, file, cb) => cb(null, tmpDir),
-    filename: (req, file, cb) => {
-      // unique temp name
-      const ext = path.extname(file.originalname || "");
-      cb(null, `${Date.now()}-${Math.random().toString(16).slice(2)}${ext}`);
-    },
-  }),
-  limits: {
-    fileSize: 25 * 1024 * 1024, // 25MB (für mp3/bild ok; falls nötig erhöhen)
-  },
-});
 
 function safeDateOrNull(s) {
   if (s === undefined || s === null) return null;
@@ -76,21 +57,54 @@ async function withTx(fn) {
   }
 }
 
-// ---------- Health ----------
+// ---------- Upload directories ----------
+const publicDir = path.join(__dirname, "public");
+const uploadsDir = path.join(publicDir, "uploads");
+const uploadsMusikerDir = path.join(uploadsDir, "musiker");
+const uploadsFormationDir = path.join(uploadsDir, "formation");
+const tmpDir = path.join(uploadsDir, "_tmp");
+
+ensureDir(uploadsMusikerDir);
+ensureDir(uploadsFormationDir);
+ensureDir(tmpDir);
+
+// Multer: store in tmp first, rename to <id> later
+const upload = multer({
+  storage: multer.diskStorage({
+    destination: (req, file, cb) => cb(null, tmpDir),
+    filename: (req, file, cb) => {
+      const ext = path.extname(file.originalname || "");
+      cb(null, `${Date.now()}-${Math.random().toString(16).slice(2)}${ext}`);
+    },
+  }),
+  limits: {
+    fileSize: 25 * 1024 * 1024, // 25MB
+  },
+});
+
+// ---------- Health + Debug ----------
 app.get("/api/health", async (req, res) => {
   try {
     await pool.query("SELECT 1");
     res.json({ ok: true, db: true });
   } catch (e) {
-    res.status(500).json({ ok: false, db: false, message: e?.message, code: e?.code });
+    res.status(500).json({
+      ok: false,
+      db: false,
+      message: e?.message,
+      code: e?.code,
+    });
   }
 });
 
-// ---------- Lookups für Formulare ----------
+// Optional, can remove later:
+app.get("/api/debug", (req, res) => {
+  res.json({ cwd: process.cwd(), dirname: __dirname });
+});
+
+// ---------- Lookups for forms ----------
 app.get("/api/lookups/formationen", async (req, res) => {
-  const [rows] = await pool.query(
-    "SELECT id, name FROM formation ORDER BY name"
-  );
+  const [rows] = await pool.query("SELECT id, name FROM formation ORDER BY name");
   res.json(rows);
 });
 
@@ -111,7 +125,7 @@ app.get("/api/lookups/genres", async (req, res) => {
   res.json(rows);
 });
 
-// ---------- GET Musiker / Formation (wie bei dir) ----------
+// ---------- GET Musiker ----------
 app.get("/api/musiker/:id", async (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isFinite(id)) return res.status(400).json({ error: "Ungültige ID" });
@@ -158,6 +172,7 @@ app.get("/api/musiker/:id", async (req, res) => {
   res.json({ ...musikerRows[0], instrumente, formationen, machtMusikMit });
 });
 
+// ---------- GET Formation ----------
 app.get("/api/formation/:id", async (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isFinite(id)) return res.status(400).json({ error: "Ungültige ID" });
@@ -191,86 +206,73 @@ app.get("/api/formation/:id", async (req, res) => {
   res.json({ ...formationRows[0], genres, mitglieder });
 });
 
-// ---------- POST Musiker (multipart + Foto + Instrumente + Mitgliedschaften) ----------
-app.post(
-  "/api/musiker",
-  upload.single("foto"),
-  async (req, res) => {
-    try {
-      const {
-        vorname,
-        nachname,
-        geburtsdatum,
-        todesdatum,
-        biografie,
-        instrument_ids,   // JSON string: [1,2,3]
-        formationen       // JSON string: [{formation_id, eintrittsdatum, austrittsdatum}]
-      } = req.body;
+// ---------- POST Musiker (foto + instrumente + mitgliedschaften) ----------
+app.post("/api/musiker", upload.single("foto"), async (req, res) => {
+  try {
+    const { vorname, nachname, geburtsdatum, todesdatum, biografie, instrument_ids, formationen } =
+      req.body;
 
-      if (!vorname || !nachname || !geburtsdatum) {
-        return res.status(400).json({ error: "vorname, nachname, geburtsdatum sind Pflicht" });
+    if (!vorname || !nachname || !geburtsdatum) {
+      return res.status(400).json({ error: "vorname, nachname, geburtsdatum sind Pflicht" });
+    }
+
+    const instruments = instrument_ids ? JSON.parse(instrument_ids) : [];
+    const memberships = formationen ? JSON.parse(formationen) : [];
+
+    const result = await withTx(async (conn) => {
+      const [r] = await conn.query(
+        `
+        INSERT INTO musiker (vorname, nachname, geburtsdatum, todesdatum, biografie, foto_path)
+        VALUES (?, ?, ?, ?, ?, NULL)
+        `,
+        [vorname, nachname, geburtsdatum, safeDateOrNull(todesdatum), biografie || null]
+      );
+
+      const musikerId = r.insertId;
+
+      // Foto speichern
+      let fotoPath = null;
+      if (req.file) {
+        const ext = path.extname(req.file.originalname || "") || ".jpg";
+        const finalRel = `uploads/musiker/${musikerId}${ext}`;
+        const finalAbs = path.join(publicDir, finalRel);
+        fs.renameSync(req.file.path, finalAbs);
+        fotoPath = finalRel;
+        await conn.query("UPDATE musiker SET foto_path = ? WHERE id = ?", [fotoPath, musikerId]);
       }
 
-      const instruments = instrument_ids ? JSON.parse(instrument_ids) : [];
-      const memberships = formationen ? JSON.parse(formationen) : [];
-
-      const result = await withTx(async (conn) => {
-        // 1) Musiker insert ohne foto_path (kommt nach rename)
-        const [r] = await conn.query(
-          `
-          INSERT INTO musiker (vorname, nachname, geburtsdatum, todesdatum, biografie, foto_path)
-          VALUES (?, ?, ?, ?, ?, NULL)
-          `,
-          [vorname, nachname, geburtsdatum, safeDateOrNull(todesdatum), biografie || null]
+      // Instrumente
+      for (const instId of instruments) {
+        if (!instId) continue;
+        await conn.query(
+          "INSERT IGNORE INTO musiker_instrument (musiker_id, instrument_id) VALUES (?, ?)",
+          [musikerId, Number(instId)]
         );
-        const musikerId = r.insertId;
+      }
 
-        // 2) Foto speichern (falls vorhanden)
-        let fotoPath = null;
-        if (req.file) {
-          const ext = path.extname(req.file.originalname || "") || ".jpg";
-          const finalRel = `uploads/musiker/${musikerId}${ext}`;
-          const finalAbs = path.join(publicDir, finalRel);
-          fs.renameSync(req.file.path, finalAbs);
-          fotoPath = finalRel;
+      // Mitgliedschaften
+      for (const ms of memberships) {
+        const formationId = Number(ms.formation_id);
+        if (!formationId || !ms.eintrittsdatum) continue;
+        await conn.query(
+          `
+          INSERT INTO mitgliedschaft (musiker_id, formation_id, eintrittsdatum, austrittsdatum)
+          VALUES (?, ?, ?, ?)
+          `,
+          [musikerId, formationId, ms.eintrittsdatum, safeDateOrNull(ms.austrittsdatum)]
+        );
+      }
 
-          await conn.query("UPDATE musiker SET foto_path = ? WHERE id = ?", [fotoPath, musikerId]);
-        }
+      return { id: musikerId, foto_path: fotoPath };
+    });
 
-        // 3) Instrumente n:m
-        for (const instId of instruments) {
-          if (!instId) continue;
-          await conn.query(
-            "INSERT IGNORE INTO musiker_instrument (musiker_id, instrument_id) VALUES (?, ?)",
-            [musikerId, Number(instId)]
-          );
-        }
-
-        // 4) Mitgliedschaften
-        for (const ms of memberships) {
-          const formationId = Number(ms.formation_id);
-          if (!formationId || !ms.eintrittsdatum) continue;
-
-          await conn.query(
-            `
-            INSERT INTO mitgliedschaft (musiker_id, formation_id, eintrittsdatum, austrittsdatum)
-            VALUES (?, ?, ?, ?)
-            `,
-            [musikerId, formationId, ms.eintrittsdatum, safeDateOrNull(ms.austrittsdatum)]
-          );
-        }
-
-        return { id: musikerId, foto_path: fotoPath };
-      });
-
-      res.status(201).json({ ok: true, musiker: result });
-    } catch (e) {
-      res.status(500).json({ ok: false, message: e?.message, code: e?.code });
-    }
+    res.status(201).json({ ok: true, musiker: result });
+  } catch (e) {
+    res.status(500).json({ ok: false, message: e?.message, code: e?.code });
   }
-);
+});
 
-// ---------- POST Formation (multipart + Bild+mp3 + Genres + Mitglieder) ----------
+// ---------- POST Formation (foto + mp3 + genres + mitglieder) ----------
 app.post(
   "/api/formation",
   upload.fields([
@@ -279,14 +281,7 @@ app.post(
   ]),
   async (req, res) => {
     try {
-      const {
-        name,
-        gruendungsdatum,
-        aufloesungsdatum,
-        biografie,
-        genre_ids,     // JSON string: [1,2]
-        mitglieder     // JSON string: [{musiker_id, eintrittsdatum, austrittsdatum}]
-      } = req.body;
+      const { name, gruendungsdatum, aufloesungsdatum, biografie, genre_ids, mitglieder } = req.body;
 
       if (!name || !gruendungsdatum) {
         return res.status(400).json({ error: "name, gruendungsdatum sind Pflicht" });
@@ -295,11 +290,10 @@ app.post(
       const genres = genre_ids ? JSON.parse(genre_ids) : [];
       const members = mitglieder ? JSON.parse(mitglieder) : [];
 
-      const filesFoto = req.files?.foto?.[0] || null;
-      const filesMp3 = req.files?.mp3?.[0] || null;
+      const fotoFile = req.files?.foto?.[0] || null;
+      const mp3File = req.files?.mp3?.[0] || null;
 
       const result = await withTx(async (conn) => {
-        // 1) Formation insert ohne paths
         const [r] = await conn.query(
           `
           INSERT INTO formation (name, gruendungsdatum, aufloesungsdatum, biografie, foto_path, mp3_path)
@@ -307,31 +301,32 @@ app.post(
           `,
           [name, gruendungsdatum, safeDateOrNull(aufloesungsdatum), biografie || null]
         );
+
         const formationId = r.insertId;
 
-        // 2) Foto speichern
+        // Foto speichern
         let fotoPath = null;
-        if (filesFoto) {
-          const ext = path.extname(filesFoto.originalname || "") || ".jpg";
+        if (fotoFile) {
+          const ext = path.extname(fotoFile.originalname || "") || ".jpg";
           const finalRel = `uploads/formation/${formationId}${ext}`;
           const finalAbs = path.join(publicDir, finalRel);
-          fs.renameSync(filesFoto.path, finalAbs);
+          fs.renameSync(fotoFile.path, finalAbs);
           fotoPath = finalRel;
           await conn.query("UPDATE formation SET foto_path = ? WHERE id = ?", [fotoPath, formationId]);
         }
 
-        // 3) MP3 speichern
+        // MP3 speichern
         let mp3Path = null;
-        if (filesMp3) {
-          const ext = path.extname(filesMp3.originalname || "") || ".mp3";
+        if (mp3File) {
+          const ext = path.extname(mp3File.originalname || "") || ".mp3";
           const finalRel = `uploads/formation/${formationId}${ext}`;
           const finalAbs = path.join(publicDir, finalRel);
-          fs.renameSync(filesMp3.path, finalAbs);
+          fs.renameSync(mp3File.path, finalAbs);
           mp3Path = finalRel;
           await conn.query("UPDATE formation SET mp3_path = ? WHERE id = ?", [mp3Path, formationId]);
         }
 
-        // 4) Genres n:m
+        // Genres
         for (const gId of genres) {
           if (!gId) continue;
           await conn.query(
@@ -340,11 +335,10 @@ app.post(
           );
         }
 
-        // 5) Mitglieder (mitgliedschaft)
+        // Mitglieder
         for (const ms of members) {
           const musikerId = Number(ms.musiker_id);
           if (!musikerId || !ms.eintrittsdatum) continue;
-
           await conn.query(
             `
             INSERT INTO mitgliedschaft (musiker_id, formation_id, eintrittsdatum, austrittsdatum)
