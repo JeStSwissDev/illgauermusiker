@@ -16,6 +16,10 @@ console.log("=================================");
 console.log("Musikarchiv gestartet");
 console.log("Version:", APP_VERSION);
 console.log("Startzeit:", APP_STARTED_AT);
+console.log("DB_HOST:", process.env.DB_HOST || "(nicht gesetzt)");
+console.log("DB_PORT:", process.env.DB_PORT || "(default 3306)");
+console.log("DB_NAME:", process.env.DB_NAME || "(nicht gesetzt)");
+console.log("DB_USER:", process.env.DB_USER || "(nicht gesetzt)");
 console.log("=================================");
 
 const app = express();
