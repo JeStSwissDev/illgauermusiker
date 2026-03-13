@@ -1,58 +1,159 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="de">
 <head>
-  <meta charset="UTF-8" />
-  <title>Illgauer Musikarchiv</title>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Musikarchiv Illgau</title>
   <style>
-    body { font-family: Arial, sans-serif; margin: 40px; }
-    h1 { margin-bottom: 30px; }
-    h2 { margin-top: 40px; }
-    ul { line-height: 1.8; }
-    a { text-decoration: none; color: #0a58ca; }
-    a:hover { text-decoration: underline; }
+    body { font-family: system-ui, sans-serif; max-width: 900px; margin: 24px auto; padding: 0 16px; }
+    .card { border: 1px solid #ddd; border-radius: 12px; padding: 16px; margin: 12px 0; }
+    img { max-width: 320px; border-radius: 12px; }
+    a { text-decoration: none; }
+    ul { margin: 8px 0 0 18px; }
+    .muted { color: #666; }
   </style>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 </head>
 <body>
+  <h1>Musikarchiv Illgau</h1>
 
-<h1>Illgauer Musikarchiv</h1>
+  <button id="qrBtn" style="padding:10px 12px;">QR-Code anzeigen</button>
 
-<h2>Formationen</h2>
-<ul id="formationen"></ul>
+  <div id="qrWrap" class="card" style="display:none;">
+    <h3>QR-Code</h3>
+    <div id="qrcode"></div>
+    <p class="muted"><span id="qrUrl"></span></p>
+    <button id="qrClose" style="padding:10px 12px;">Schliessen</button>
+  </div>
 
-<h2>Musiker</h2>
-<ul id="musiker"></ul>
+  <div id="content" class="card">Lade…</div>
 
 <script>
-async function loadFormationen() {
-  const res = await fetch("/api/lookups/formationen");
-  const data = await res.json();
+  const params = new URLSearchParams(location.search);
+  const type = params.get("type");
+  const id = params.get("id");
 
-  const ul = document.getElementById("formationen");
+  function linkTo(t, i, label) {
+    return `<a href="/?type=${encodeURIComponent(t)}&id=${encodeURIComponent(i)}">${label}</a>`;
+  }
 
-  data.forEach(f => {
-    const li = document.createElement("li");
-    li.innerHTML = `<a href="/api/formation/${f.id}">${f.name}</a>`;
-    ul.appendChild(li);
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  }
+
+  async function loadStartPage() {
+    const [formationenRes, musikerRes] = await Promise.all([
+      fetch("/api/lookups/formationen"),
+      fetch("/api/lookups/musiker")
+    ]);
+
+    const formationen = await formationenRes.json();
+    const musiker = await musikerRes.json();
+
+    document.getElementById("content").innerHTML = `
+      <h2>Formationen</h2>
+      ${formationen?.length
+        ? `<ul>${formationen.map(f => `<li>${linkTo("formation", f.id, escapeHtml(f.name))}</li>`).join("")}</ul>`
+        : `<p class="muted">Keine Formationen erfasst</p>`}
+
+      <div class="card">
+        <h3>Musiker</h3>
+        ${musiker?.length
+          ? `<ul>${musiker.map(m => `<li>${linkTo("musiker", m.id, escapeHtml(m.nachname + " " + m.vorname))}</li>`).join("")}</ul>`
+          : `<p class="muted">Keine Musiker erfasst</p>`}
+      </div>
+    `;
+  }
+
+  async function loadDetailPage() {
+    const res = await fetch(`/api/${type}/${id}`);
+    const data = await res.json();
+
+    if (!res.ok) {
+      document.getElementById("content").innerHTML = `<h2>Fehler</h2><pre>${JSON.stringify(data, null, 2)}</pre>`;
+      return;
+    }
+
+    if (type === "musiker") {
+      const name = `${data.vorname} ${data.nachname}`;
+      document.getElementById("content").innerHTML = `
+        <h2>${name}</h2>
+        ${data.foto_path ? `<img src="/${data.foto_path}" alt="${name}">` : ""}
+        ${data.biografie ? `<p>${escapeHtml(data.biografie)}</p>` : ""}
+        <p><strong>Geburtsdatum:</strong> ${data.geburtsdatum}</p>
+        ${data.todesdatum ? `<p><strong>Todesdatum:</strong> ${data.todesdatum}</p>` : ""}
+
+        <div class="card">
+          <h3>Instrumente</h3>
+          ${data.instrumente?.length ? `<ul>${data.instrumente.map(i => `<li>${escapeHtml(i.name)}</li>`).join("")}</ul>` : "<p class='muted'>Keine erfasst</p>"}
+        </div>
+
+        <div class="card">
+          <h3>Formationen</h3>
+          ${data.formationen?.length ? `<ul>${data.formationen.map(f => `<li>${linkTo("formation", f.id, escapeHtml(f.name))} <span class="muted">(${f.eintrittsdatum}${f.austrittsdatum ? " – " + f.austrittsdatum : " – aktiv"})</span></li>`).join("")}</ul>` : "<p class='muted'>Keine erfasst</p>"}
+        </div>
+
+        <div class="card">
+          <h3>Macht Musik mit ${name}</h3>
+          ${data.machtMusikMit?.length ? `<ul>${data.machtMusikMit.map(m => `<li>${linkTo("musiker", m.id, escapeHtml(m.vorname + " " + m.nachname))}</li>`).join("")}</ul>` : "<p class='muted'>Keine Einträge</p>"}
+        </div>
+      `;
+    }
+
+    if (type === "formation") {
+      const name = data.name;
+      document.getElementById("content").innerHTML = `
+        <h2>${escapeHtml(name)}</h2>
+        ${data.foto_path ? `<img src="/${data.foto_path}" alt="${escapeHtml(name)}">` : ""}
+        ${data.biografie ? `<p>${escapeHtml(data.biografie)}</p>` : ""}
+        <p><strong>Gründung:</strong> ${data.gruendungsdatum}</p>
+        ${data.aufloesungsdatum ? `<p><strong>Auflösung:</strong> ${data.aufloesungsdatum}</p>` : ""}
+
+        ${data.mp3_path ? `<audio controls src="/${data.mp3_path}" style="width:100%"></audio>` : ""}
+
+        <div class="card">
+          <h3>Genres</h3>
+          ${data.genres?.length ? `<ul>${data.genres.map(g => `<li>${escapeHtml(g.name)}</li>`).join("")}</ul>` : "<p class='muted'>Keine erfasst</p>"}
+        </div>
+
+        <div class="card">
+          <h3>Mitglieder</h3>
+          ${data.mitglieder?.length ? `<ul>${data.mitglieder.map(m => `<li>${linkTo("musiker", m.id, escapeHtml(m.vorname + " " + m.nachname))} <span class="muted">(${m.eintrittsdatum}${m.austrittsdatum ? " – " + m.austrittsdatum : " – aktiv"})</span></li>`).join("")}</ul>` : "<p class='muted'>Keine erfasst</p>"}
+        </div>
+      `;
+    }
+  }
+
+  async function load() {
+    if (!type || !id) {
+      await loadStartPage();
+      return;
+    }
+    await loadDetailPage();
+  }
+
+  load();
+
+  const qrBtn = document.getElementById("qrBtn");
+  const qrWrap = document.getElementById("qrWrap");
+  const qrClose = document.getElementById("qrClose");
+  const qrUrl = document.getElementById("qrUrl");
+  const qrDiv = document.getElementById("qrcode");
+
+  function showQr(url) {
+    qrDiv.innerHTML = "";
+    qrUrl.textContent = url;
+    qrWrap.style.display = "block";
+    new QRCode(qrDiv, { text: url, width: 220, height: 220 });
+  }
+
+  qrBtn?.addEventListener("click", () => {
+    showQr(window.location.href);
   });
-}
 
-async function loadMusiker() {
-  const res = await fetch("/api/lookups/musiker");
-  const data = await res.json();
-
-  const ul = document.getElementById("musiker");
-
-  data.forEach(m => {
-    const name = `${m.nachname} ${m.vorname}`;
-    const li = document.createElement("li");
-    li.innerHTML = `<a href="/api/musiker/${m.id}">${name}</a>`;
-    ul.appendChild(li);
+  qrClose?.addEventListener("click", () => {
+    qrWrap.style.display = "none";
   });
-}
-
-loadFormationen();
-loadMusiker();
 </script>
-
 </body>
 </html>
