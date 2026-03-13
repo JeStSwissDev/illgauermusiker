@@ -16,6 +16,8 @@
 </head>
 <body>
   <h1><a href="/">Musikarchiv Illgau</a></h1>
+  
+  <button type="button" id="logoutBtn">Logout</button>
 
   <button id="qrBtn" style="padding:10px 12px;">QR-Code anzeigen</button>
 
@@ -152,6 +154,29 @@
   qrClose?.addEventListener("click", () => {
     qrWrap.style.display = "none";
   });
+
+  const logoutBtn = document.getElementById("logoutBtn");
+
+  logoutBtn?.addEventListener("click", async () => {
+    if (!confirm("Wirklich ausloggen?")) return;
+
+    try {
+      const res = await fetch("/api/logout", {
+        method: "POST",
+        credentials: "include" // wichtig für Session-Cookie
+      });
+
+      if (res.ok) {
+        alert("Erfolgreich ausgeloggt");
+        window.location.href = "/";
+      } else {
+        alert("Logout fehlgeschlagen");
+      }
+    } catch (e) {
+      alert("Fehler beim Logout");
+    }
+  });
+
 </script>
 </body>
 </html>
