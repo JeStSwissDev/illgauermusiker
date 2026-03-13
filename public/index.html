@@ -16,7 +16,7 @@
 </head>
 <body>
   <h1><a href="/">Musikarchiv Illgau</a></h1>
-  
+
   <button type="button" id="logoutBtn">Logout</button>
 
   <button id="qrBtn" style="padding:10px 12px;">QR-Code anzeigen</button>
@@ -177,6 +177,13 @@
     }
   });
 
+  fetch("/api/me", { credentials: "include" })
+  .then(r => r.json())
+  .then(d => {
+    if (!d.authenticated) {
+      document.getElementById("logoutBtn")?.remove();
+    }
+  });
 </script>
 </body>
 </html>
