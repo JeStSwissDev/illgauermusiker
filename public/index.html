@@ -56,12 +56,10 @@
         ? `<ul>${formationen.map(f => `<li>${linkTo("formation", f.id, escapeHtml(f.name))}</li>`).join("")}</ul>`
         : `<p class="muted">Keine Formationen erfasst</p>`}
 
-      <div class="card">
-        <h3>Musiker</h3>
-        ${musiker?.length
-          ? `<ul>${musiker.map(m => `<li>${linkTo("musiker", m.id, escapeHtml(m.nachname + " " + m.vorname))}</li>`).join("")}</ul>`
-          : `<p class="muted">Keine Musiker erfasst</p>`}
-      </div>
+      <h2>Musiker</h2>
+      ${musiker?.length
+        ? `<ul>${musiker.map(m => `<li>${linkTo("musiker", m.id, escapeHtml(m.nachname + " " + m.vorname))}</li>`).join("")}</ul>`
+        : `<p class="muted">Keine Musiker erfasst</p>`}
     `;
   }
 
