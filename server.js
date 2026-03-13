@@ -5,6 +5,7 @@ import mysql from "mysql2/promise";
 import multer from "multer";
 import fs from "fs";
 import path from "path";
+import session from "express-session";
 import { fileURLToPath } from "url";
 
 dotenv.config();
@@ -26,14 +27,49 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// --- __dirname for ESM (CRITICAL for hosting) ---
+app.use(session({
+  secret: process.env.SESSION_SECRET || "change-me",
+  resave: false,
+  saveUninitialized: false,
+  cookie: {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: false,
+    maxAge: 1000 * 60 * 60 * 8
+  }
+}));
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// --- Static files (index.html, add-*.html, uploads/*) ---
+function requireAuthPage(req, res, next) {
+  if (req.session?.isAuthenticated) return next();
+  return res.redirect("/login.html");
+}
+
+function requireAuthApi(req, res, next) {
+  if (req.session?.isAuthenticated) return next();
+  return res.status(401).json({ ok: false, error: "Nicht eingeloggt" });
+}
+
+app.get("/add-musiker.html", requireAuthPage, (req, res) => {
+  res.sendFile(path.join(__dirname, "public", "add-musiker.html"));
+});
+
+app.get("/add-formation.html", requireAuthPage, (req, res) => {
+  res.sendFile(path.join(__dirname, "public", "add-formation.html"));
+});
+
+app.get("/add-genre.html", requireAuthPage, (req, res) => {
+  res.sendFile(path.join(__dirname, "public", "add-genre.html"));
+});
+
+app.get("/add-instrument.html", requireAuthPage, (req, res) => {
+  res.sendFile(path.join(__dirname, "public", "add-instrument.html"));
+});
+
 app.use(express.static(path.join(__dirname, "public")));
 
-// --- DB pool ---
 const pool = mysql.createPool({
   host: process.env.DB_HOST,
   port: process.env.DB_PORT ? Number(process.env.DB_PORT) : 3306,
@@ -44,7 +80,6 @@ const pool = mysql.createPool({
   connectionLimit: 10,
 });
 
-// ---------- Helpers ----------
 const ensureDir = (p) => {
   if (!fs.existsSync(p)) fs.mkdirSync(p, { recursive: true });
 };
@@ -70,7 +105,6 @@ async function withTx(fn) {
   }
 }
 
-// ---------- Upload directories ----------
 const publicDir = path.join(__dirname, "public");
 const uploadsDir = path.join(publicDir, "uploads");
 const uploadsMusikerDir = path.join(uploadsDir, "musiker");
@@ -81,7 +115,6 @@ ensureDir(uploadsMusikerDir);
 ensureDir(uploadsFormationDir);
 ensureDir(tmpDir);
 
-// Multer: store in tmp first, rename to <id> later
 const upload = multer({
   storage: multer.diskStorage({
     destination: (req, file, cb) => cb(null, tmpDir),
@@ -91,11 +124,10 @@ const upload = multer({
     },
   }),
   limits: {
-    fileSize: 25 * 1024 * 1024, // 25MB
+    fileSize: 25 * 1024 * 1024,
   },
 });
 
-// Version Handling
 app.get("/api/version", (req, res) => {
   res.json({
     version: APP_VERSION,
@@ -103,7 +135,32 @@ app.get("/api/version", (req, res) => {
   });
 });
 
-// ---------- Health + Debug ----------
+app.post("/api/login", (req, res) => {
+  const password = String(req.body?.password || "");
+  const expected = process.env.ADMIN_PASSWORD || "";
+
+  if (!expected) {
+    return res.status(500).json({ ok: false, error: "ADMIN_PASSWORD nicht gesetzt" });
+  }
+
+  if (password !== expected) {
+    return res.status(401).json({ ok: false, error: "Falsches Passwort" });
+  }
+
+  req.session.isAuthenticated = true;
+  res.json({ ok: true });
+});
+
+app.post("/api/logout", (req, res) => {
+  req.session.destroy(() => {
+    res.json({ ok: true });
+  });
+});
+
+app.get("/api/me", (req, res) => {
+  res.json({ authenticated: !!req.session?.isAuthenticated });
+});
+
 app.get("/api/health", async (req, res) => {
   try {
     await pool.query("SELECT 1");
@@ -118,12 +175,10 @@ app.get("/api/health", async (req, res) => {
   }
 });
 
-// Optional, can remove later:
 app.get("/api/debug", (req, res) => {
   res.json({ cwd: process.cwd(), dirname: __dirname });
 });
 
-// ---------- Lookups for forms ----------
 app.get("/api/lookups/formationen", async (req, res) => {
   const [rows] = await pool.query("SELECT id, name FROM formation ORDER BY name");
   res.json(rows);
@@ -146,7 +201,6 @@ app.get("/api/lookups/genres", async (req, res) => {
   res.json(rows);
 });
 
-// ---------- List Genres / Instrumente ----------
 app.get("/api/genre", async (req, res) => {
   const [rows] = await pool.query("SELECT id, name FROM genre ORDER BY name");
   res.json(rows);
@@ -157,13 +211,11 @@ app.get("/api/instrument", async (req, res) => {
   res.json(rows);
 });
 
-// ---------- Create Genre ----------
-app.post("/api/genre", async (req, res) => {
+app.post("/api/genre", requireAuthApi, async (req, res) => {
   try {
     const name = String(req.body?.name || "").trim();
     if (!name) return res.status(400).json({ ok: false, error: "name ist Pflicht" });
 
-    // UNIQUE(name) ist in deiner Tabelle schon drin -> Duplikate sauber behandeln
     const [r] = await pool.query("INSERT INTO genre (name) VALUES (?)", [name]);
     res.status(201).json({ ok: true, genre: { id: r.insertId, name } });
   } catch (e) {
@@ -174,8 +226,7 @@ app.post("/api/genre", async (req, res) => {
   }
 });
 
-// ---------- Create Instrument ----------
-app.post("/api/instrument", async (req, res) => {
+app.post("/api/instrument", requireAuthApi, async (req, res) => {
   try {
     const name = String(req.body?.name || "").trim();
     if (!name) return res.status(400).json({ ok: false, error: "name ist Pflicht" });
@@ -190,7 +241,6 @@ app.post("/api/instrument", async (req, res) => {
   }
 });
 
-// ---------- GET Musiker ----------
 app.get("/api/musiker/:id", async (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isFinite(id)) return res.status(400).json({ error: "Ungültige ID" });
@@ -237,7 +287,6 @@ app.get("/api/musiker/:id", async (req, res) => {
   res.json({ ...musikerRows[0], instrumente, formationen, machtMusikMit });
 });
 
-// ---------- GET Formation ----------
 app.get("/api/formation/:id", async (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isFinite(id)) return res.status(400).json({ error: "Ungültige ID" });
@@ -271,8 +320,7 @@ app.get("/api/formation/:id", async (req, res) => {
   res.json({ ...formationRows[0], genres, mitglieder });
 });
 
-// ---------- POST Musiker (foto + instrumente + mitgliedschaften) ----------
-app.post("/api/musiker", upload.single("foto"), async (req, res) => {
+app.post("/api/musiker", requireAuthApi, upload.single("foto"), async (req, res) => {
   try {
     const { vorname, nachname, geburtsdatum, todesdatum, biografie, instrument_ids, formationen } =
       req.body;
@@ -295,7 +343,6 @@ app.post("/api/musiker", upload.single("foto"), async (req, res) => {
 
       const musikerId = r.insertId;
 
-      // Foto speichern
       let fotoPath = null;
       if (req.file) {
         const ext = path.extname(req.file.originalname || "") || ".jpg";
@@ -306,7 +353,6 @@ app.post("/api/musiker", upload.single("foto"), async (req, res) => {
         await conn.query("UPDATE musiker SET foto_path = ? WHERE id = ?", [fotoPath, musikerId]);
       }
 
-      // Instrumente
       for (const instId of instruments) {
         if (!instId) continue;
         await conn.query(
@@ -315,7 +361,6 @@ app.post("/api/musiker", upload.single("foto"), async (req, res) => {
         );
       }
 
-      // Mitgliedschaften
       for (const ms of memberships) {
         const formationId = Number(ms.formation_id);
         if (!formationId || !ms.eintrittsdatum) continue;
@@ -337,9 +382,9 @@ app.post("/api/musiker", upload.single("foto"), async (req, res) => {
   }
 });
 
-// ---------- POST Formation (foto + mp3 + genres + mitglieder) ----------
 app.post(
   "/api/formation",
+  requireAuthApi,
   upload.fields([
     { name: "foto", maxCount: 1 },
     { name: "mp3", maxCount: 1 },
@@ -369,7 +414,6 @@ app.post(
 
         const formationId = r.insertId;
 
-        // Foto speichern
         let fotoPath = null;
         if (fotoFile) {
           const ext = path.extname(fotoFile.originalname || "") || ".jpg";
@@ -380,7 +424,6 @@ app.post(
           await conn.query("UPDATE formation SET foto_path = ? WHERE id = ?", [fotoPath, formationId]);
         }
 
-        // MP3 speichern
         let mp3Path = null;
         if (mp3File) {
           const ext = path.extname(mp3File.originalname || "") || ".mp3";
@@ -391,7 +434,6 @@ app.post(
           await conn.query("UPDATE formation SET mp3_path = ? WHERE id = ?", [mp3Path, formationId]);
         }
 
-        // Genres
         for (const gId of genres) {
           if (!gId) continue;
           await conn.query(
@@ -400,7 +442,6 @@ app.post(
           );
         }
 
-        // Mitglieder
         for (const ms of members) {
           const musikerId = Number(ms.musiker_id);
           if (!musikerId || !ms.eintrittsdatum) continue;
@@ -423,7 +464,6 @@ app.post(
   }
 );
 
-// ---------- Start ----------
 const PORT = process.env.PORT ? Number(process.env.PORT) : 3000;
 const HOST = "0.0.0.0";
 app.listen(PORT, HOST, () => {
