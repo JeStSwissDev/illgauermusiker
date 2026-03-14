@@ -35,8 +35,8 @@ app.use(session({
     httpOnly: true,
     sameSite: "lax",
     secure: false,
-    maxAge: 1000 * 60 * 60 * 8
-  }
+    maxAge: 1000 * 60 * 60 * 8,
+  },
 }));
 
 const __filename = fileURLToPath(import.meta.url);
@@ -52,21 +52,18 @@ function requireAuthApi(req, res, next) {
   return res.status(401).json({ ok: false, error: "Nicht eingeloggt" });
 }
 
-app.get("/add-musiker.html", requireAuthPage, (req, res) => {
-  res.sendFile(path.join(__dirname, "public", "add-musiker.html"));
-});
+const protectedPages = [
+  "/add-musiker.html",
+  "/add-formation.html",
+  "/add-genre.html",
+  "/add-instrument.html",
+];
 
-app.get("/add-formation.html", requireAuthPage, (req, res) => {
-  res.sendFile(path.join(__dirname, "public", "add-formation.html"));
-});
-
-app.get("/add-genre.html", requireAuthPage, (req, res) => {
-  res.sendFile(path.join(__dirname, "public", "add-genre.html"));
-});
-
-app.get("/add-instrument.html", requireAuthPage, (req, res) => {
-  res.sendFile(path.join(__dirname, "public", "add-instrument.html"));
-});
+for (const page of protectedPages) {
+  app.get(page, requireAuthPage, (req, res) => {
+    res.sendFile(path.join(__dirname, "public", path.basename(page)));
+  });
+}
 
 app.use(express.static(path.join(__dirname, "public")));
 
@@ -88,6 +85,48 @@ function safeDateOrNull(s) {
   if (s === undefined || s === null) return null;
   const t = String(s).trim();
   return t === "" ? null : t;
+}
+
+function safeTextOrNull(s) {
+  if (s === undefined || s === null) return null;
+  const t = String(s).trim();
+  return t === "" ? null : t;
+}
+
+function parseJsonArray(value, fallback = []) {
+  if (!value) return fallback;
+  if (Array.isArray(value)) return value;
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function cleanupTempFiles(req) {
+  const files = [];
+  if (req?.file?.path) files.push(req.file.path);
+  if (req?.files) {
+    for (const entry of Object.values(req.files)) {
+      for (const f of entry || []) {
+        if (f?.path) files.push(f.path);
+      }
+    }
+  }
+  for (const filePath of files) {
+    try {
+      if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+    } catch {}
+  }
+}
+
+function deleteFileIfExists(relPath) {
+  if (!relPath) return;
+  const absPath = path.join(publicDir, relPath);
+  try {
+    if (fs.existsSync(absPath)) fs.unlinkSync(absPath);
+  } catch {}
 }
 
 async function withTx(fn) {
@@ -206,9 +245,25 @@ app.get("/api/genre", async (req, res) => {
   res.json(rows);
 });
 
+app.get("/api/genre/:id", async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isFinite(id)) return res.status(400).json({ ok: false, error: "Ungültige ID" });
+  const [rows] = await pool.query("SELECT id, name FROM genre WHERE id = ?", [id]);
+  if (!rows.length) return res.status(404).json({ ok: false, error: "Genre nicht gefunden" });
+  res.json(rows[0]);
+});
+
 app.get("/api/instrument", async (req, res) => {
   const [rows] = await pool.query("SELECT id, name FROM instrument ORDER BY name");
   res.json(rows);
+});
+
+app.get("/api/instrument/:id", async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isFinite(id)) return res.status(400).json({ ok: false, error: "Ungültige ID" });
+  const [rows] = await pool.query("SELECT id, name FROM instrument WHERE id = ?", [id]);
+  if (!rows.length) return res.status(404).json({ ok: false, error: "Instrument nicht gefunden" });
+  res.json(rows[0]);
 });
 
 app.post("/api/genre", requireAuthApi, async (req, res) => {
@@ -226,6 +281,36 @@ app.post("/api/genre", requireAuthApi, async (req, res) => {
   }
 });
 
+app.put("/api/genre/:id", requireAuthApi, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const name = String(req.body?.name || "").trim();
+    if (!Number.isFinite(id)) return res.status(400).json({ ok: false, error: "Ungültige ID" });
+    if (!name) return res.status(400).json({ ok: false, error: "name ist Pflicht" });
+
+    const [r] = await pool.query("UPDATE genre SET name = ? WHERE id = ?", [name, id]);
+    if (!r.affectedRows) return res.status(404).json({ ok: false, error: "Genre nicht gefunden" });
+    res.json({ ok: true, genre: { id, name } });
+  } catch (e) {
+    if (e?.code === "ER_DUP_ENTRY") {
+      return res.status(409).json({ ok: false, error: "Genre existiert bereits" });
+    }
+    res.status(500).json({ ok: false, message: e?.message, code: e?.code });
+  }
+});
+
+app.delete("/api/genre/:id", requireAuthApi, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return res.status(400).json({ ok: false, error: "Ungültige ID" });
+    const [r] = await pool.query("DELETE FROM genre WHERE id = ?", [id]);
+    if (!r.affectedRows) return res.status(404).json({ ok: false, error: "Genre nicht gefunden" });
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ ok: false, message: e?.message, code: e?.code });
+  }
+});
+
 app.post("/api/instrument", requireAuthApi, async (req, res) => {
   try {
     const name = String(req.body?.name || "").trim();
@@ -237,6 +322,36 @@ app.post("/api/instrument", requireAuthApi, async (req, res) => {
     if (e?.code === "ER_DUP_ENTRY") {
       return res.status(409).json({ ok: false, error: "Instrument existiert bereits" });
     }
+    res.status(500).json({ ok: false, message: e?.message, code: e?.code });
+  }
+});
+
+app.put("/api/instrument/:id", requireAuthApi, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const name = String(req.body?.name || "").trim();
+    if (!Number.isFinite(id)) return res.status(400).json({ ok: false, error: "Ungültige ID" });
+    if (!name) return res.status(400).json({ ok: false, error: "name ist Pflicht" });
+
+    const [r] = await pool.query("UPDATE instrument SET name = ? WHERE id = ?", [name, id]);
+    if (!r.affectedRows) return res.status(404).json({ ok: false, error: "Instrument nicht gefunden" });
+    res.json({ ok: true, instrument: { id, name } });
+  } catch (e) {
+    if (e?.code === "ER_DUP_ENTRY") {
+      return res.status(409).json({ ok: false, error: "Instrument existiert bereits" });
+    }
+    res.status(500).json({ ok: false, message: e?.message, code: e?.code });
+  }
+});
+
+app.delete("/api/instrument/:id", requireAuthApi, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return res.status(400).json({ ok: false, error: "Ungültige ID" });
+    const [r] = await pool.query("DELETE FROM instrument WHERE id = ?", [id]);
+    if (!r.affectedRows) return res.status(404).json({ ok: false, error: "Instrument nicht gefunden" });
+    res.json({ ok: true });
+  } catch (e) {
     res.status(500).json({ ok: false, message: e?.message, code: e?.code });
   }
 });
@@ -322,15 +437,15 @@ app.get("/api/formation/:id", async (req, res) => {
 
 app.post("/api/musiker", requireAuthApi, upload.single("foto"), async (req, res) => {
   try {
-    const { vorname, nachname, geburtsdatum, todesdatum, biografie, instrument_ids, formationen } =
-      req.body;
+    const { vorname, nachname, geburtsdatum, todesdatum, biografie, instrument_ids, formationen } = req.body;
 
     if (!vorname || !nachname || !geburtsdatum) {
+      cleanupTempFiles(req);
       return res.status(400).json({ error: "vorname, nachname, geburtsdatum sind Pflicht" });
     }
 
-    const instruments = instrument_ids ? JSON.parse(instrument_ids) : [];
-    const memberships = formationen ? JSON.parse(formationen) : [];
+    const instruments = parseJsonArray(instrument_ids);
+    const memberships = parseJsonArray(formationen);
 
     const result = await withTx(async (conn) => {
       const [r] = await conn.query(
@@ -338,7 +453,13 @@ app.post("/api/musiker", requireAuthApi, upload.single("foto"), async (req, res)
         INSERT INTO musiker (vorname, nachname, geburtsdatum, todesdatum, biografie, foto_path)
         VALUES (?, ?, ?, ?, ?, NULL)
         `,
-        [vorname, nachname, geburtsdatum, safeDateOrNull(todesdatum), biografie || null]
+        [
+          String(vorname).trim(),
+          String(nachname).trim(),
+          geburtsdatum,
+          safeDateOrNull(todesdatum),
+          safeTextOrNull(biografie),
+        ]
       );
 
       const musikerId = r.insertId;
@@ -378,7 +499,120 @@ app.post("/api/musiker", requireAuthApi, upload.single("foto"), async (req, res)
 
     res.status(201).json({ ok: true, musiker: result });
   } catch (e) {
+    cleanupTempFiles(req);
     res.status(500).json({ ok: false, message: e?.message, code: e?.code });
+  }
+});
+
+app.put("/api/musiker/:id", requireAuthApi, upload.single("foto"), async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) {
+      cleanupTempFiles(req);
+      return res.status(400).json({ ok: false, error: "Ungültige ID" });
+    }
+
+    const { vorname, nachname, geburtsdatum, todesdatum, biografie, instrument_ids, formationen, remove_foto } = req.body;
+    if (!vorname || !nachname || !geburtsdatum) {
+      cleanupTempFiles(req);
+      return res.status(400).json({ ok: false, error: "vorname, nachname, geburtsdatum sind Pflicht" });
+    }
+
+    const instruments = parseJsonArray(instrument_ids);
+    const memberships = parseJsonArray(formationen);
+
+    const result = await withTx(async (conn) => {
+      const [existingRows] = await conn.query("SELECT id, foto_path FROM musiker WHERE id = ?", [id]);
+      if (!existingRows.length) throw Object.assign(new Error("Musiker nicht gefunden"), { statusCode: 404 });
+      const existing = existingRows[0];
+
+      let fotoPath = existing.foto_path || null;
+      let oldFotoToDelete = null;
+
+      if (String(remove_foto || "") === "1") {
+        oldFotoToDelete = fotoPath;
+        fotoPath = null;
+      }
+
+      if (req.file) {
+        oldFotoToDelete = fotoPath;
+        const ext = path.extname(req.file.originalname || "") || ".jpg";
+        const finalRel = `uploads/musiker/${id}${ext}`;
+        const finalAbs = path.join(publicDir, finalRel);
+        if (fotoPath && fotoPath !== finalRel) deleteFileIfExists(fotoPath);
+        fs.renameSync(req.file.path, finalAbs);
+        fotoPath = finalRel;
+        if (oldFotoToDelete && oldFotoToDelete !== finalRel) oldFotoToDelete = oldFotoToDelete;
+      }
+
+      await conn.query(
+        `
+        UPDATE musiker
+        SET vorname = ?, nachname = ?, geburtsdatum = ?, todesdatum = ?, biografie = ?, foto_path = ?
+        WHERE id = ?
+        `,
+        [
+          String(vorname).trim(),
+          String(nachname).trim(),
+          geburtsdatum,
+          safeDateOrNull(todesdatum),
+          safeTextOrNull(biografie),
+          fotoPath,
+          id,
+        ]
+      );
+
+      await conn.query("DELETE FROM musiker_instrument WHERE musiker_id = ?", [id]);
+      for (const instId of instruments) {
+        if (!instId) continue;
+        await conn.query(
+          "INSERT IGNORE INTO musiker_instrument (musiker_id, instrument_id) VALUES (?, ?)",
+          [id, Number(instId)]
+        );
+      }
+
+      await conn.query("DELETE FROM mitgliedschaft WHERE musiker_id = ?", [id]);
+      for (const ms of memberships) {
+        const formationId = Number(ms.formation_id);
+        if (!formationId || !ms.eintrittsdatum) continue;
+        await conn.query(
+          `
+          INSERT INTO mitgliedschaft (musiker_id, formation_id, eintrittsdatum, austrittsdatum)
+          VALUES (?, ?, ?, ?)
+          `,
+          [id, formationId, ms.eintrittsdatum, safeDateOrNull(ms.austrittsdatum)]
+        );
+      }
+
+      if (oldFotoToDelete && oldFotoToDelete !== fotoPath) deleteFileIfExists(oldFotoToDelete);
+
+      return { id, foto_path: fotoPath };
+    });
+
+    res.json({ ok: true, musiker: result });
+  } catch (e) {
+    cleanupTempFiles(req);
+    res.status(e?.statusCode || 500).json({ ok: false, error: e?.message, code: e?.code });
+  }
+});
+
+app.delete("/api/musiker/:id", requireAuthApi, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return res.status(400).json({ ok: false, error: "Ungültige ID" });
+
+    const result = await withTx(async (conn) => {
+      const [rows] = await conn.query("SELECT foto_path FROM musiker WHERE id = ?", [id]);
+      if (!rows.length) throw Object.assign(new Error("Musiker nicht gefunden"), { statusCode: 404 });
+      const fotoPath = rows[0].foto_path || null;
+      await conn.query("DELETE FROM musiker WHERE id = ?", [id]);
+      return { fotoPath };
+    });
+
+    deleteFileIfExists(result.fotoPath);
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(e?.statusCode || 500).json({ ok: false, error: e?.message, code: e?.code });
   }
 });
 
@@ -394,11 +628,12 @@ app.post(
       const { name, gruendungsdatum, aufloesungsdatum, biografie, genre_ids, mitglieder } = req.body;
 
       if (!name || !gruendungsdatum) {
+        cleanupTempFiles(req);
         return res.status(400).json({ error: "name, gruendungsdatum sind Pflicht" });
       }
 
-      const genres = genre_ids ? JSON.parse(genre_ids) : [];
-      const members = mitglieder ? JSON.parse(mitglieder) : [];
+      const genres = parseJsonArray(genre_ids);
+      const members = parseJsonArray(mitglieder);
 
       const fotoFile = req.files?.foto?.[0] || null;
       const mp3File = req.files?.mp3?.[0] || null;
@@ -409,7 +644,12 @@ app.post(
           INSERT INTO formation (name, gruendungsdatum, aufloesungsdatum, biografie, foto_path, mp3_path)
           VALUES (?, ?, ?, ?, NULL, NULL)
           `,
-          [name, gruendungsdatum, safeDateOrNull(aufloesungsdatum), biografie || null]
+          [
+            String(name).trim(),
+            gruendungsdatum,
+            safeDateOrNull(aufloesungsdatum),
+            safeTextOrNull(biografie),
+          ]
         );
 
         const formationId = r.insertId;
@@ -459,10 +699,153 @@ app.post(
 
       res.status(201).json({ ok: true, formation: result });
     } catch (e) {
+      cleanupTempFiles(req);
       res.status(500).json({ ok: false, message: e?.message, code: e?.code });
     }
   }
 );
+
+app.put(
+  "/api/formation/:id",
+  requireAuthApi,
+  upload.fields([
+    { name: "foto", maxCount: 1 },
+    { name: "mp3", maxCount: 1 },
+  ]),
+  async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      if (!Number.isFinite(id)) {
+        cleanupTempFiles(req);
+        return res.status(400).json({ ok: false, error: "Ungültige ID" });
+      }
+
+      const { name, gruendungsdatum, aufloesungsdatum, biografie, genre_ids, mitglieder, remove_foto, remove_mp3 } = req.body;
+      if (!name || !gruendungsdatum) {
+        cleanupTempFiles(req);
+        return res.status(400).json({ ok: false, error: "name, gruendungsdatum sind Pflicht" });
+      }
+
+      const genres = parseJsonArray(genre_ids);
+      const members = parseJsonArray(mitglieder);
+      const fotoFile = req.files?.foto?.[0] || null;
+      const mp3File = req.files?.mp3?.[0] || null;
+
+      const result = await withTx(async (conn) => {
+        const [existingRows] = await conn.query(
+          "SELECT id, foto_path, mp3_path FROM formation WHERE id = ?",
+          [id]
+        );
+        if (!existingRows.length) throw Object.assign(new Error("Formation nicht gefunden"), { statusCode: 404 });
+        const existing = existingRows[0];
+
+        let fotoPath = existing.foto_path || null;
+        let mp3Path = existing.mp3_path || null;
+        let oldFotoToDelete = null;
+        let oldMp3ToDelete = null;
+
+        if (String(remove_foto || "") === "1") {
+          oldFotoToDelete = fotoPath;
+          fotoPath = null;
+        }
+        if (String(remove_mp3 || "") === "1") {
+          oldMp3ToDelete = mp3Path;
+          mp3Path = null;
+        }
+
+        if (fotoFile) {
+          oldFotoToDelete = fotoPath;
+          const ext = path.extname(fotoFile.originalname || "") || ".jpg";
+          const finalRel = `uploads/formation/${id}${ext}`;
+          const finalAbs = path.join(publicDir, finalRel);
+          if (fotoPath && fotoPath !== finalRel) deleteFileIfExists(fotoPath);
+          fs.renameSync(fotoFile.path, finalAbs);
+          fotoPath = finalRel;
+        }
+
+        if (mp3File) {
+          oldMp3ToDelete = mp3Path;
+          const ext = path.extname(mp3File.originalname || "") || ".mp3";
+          const finalRel = `uploads/formation/${id}${ext}`;
+          const finalAbs = path.join(publicDir, finalRel);
+          if (mp3Path && mp3Path !== finalRel) deleteFileIfExists(mp3Path);
+          fs.renameSync(mp3File.path, finalAbs);
+          mp3Path = finalRel;
+        }
+
+        await conn.query(
+          `
+          UPDATE formation
+          SET name = ?, gruendungsdatum = ?, aufloesungsdatum = ?, biografie = ?, foto_path = ?, mp3_path = ?
+          WHERE id = ?
+          `,
+          [
+            String(name).trim(),
+            gruendungsdatum,
+            safeDateOrNull(aufloesungsdatum),
+            safeTextOrNull(biografie),
+            fotoPath,
+            mp3Path,
+            id,
+          ]
+        );
+
+        await conn.query("DELETE FROM formation_genre WHERE formation_id = ?", [id]);
+        for (const gId of genres) {
+          if (!gId) continue;
+          await conn.query(
+            "INSERT IGNORE INTO formation_genre (formation_id, genre_id) VALUES (?, ?)",
+            [id, Number(gId)]
+          );
+        }
+
+        await conn.query("DELETE FROM mitgliedschaft WHERE formation_id = ?", [id]);
+        for (const ms of members) {
+          const musikerId = Number(ms.musiker_id);
+          if (!musikerId || !ms.eintrittsdatum) continue;
+          await conn.query(
+            `
+            INSERT INTO mitgliedschaft (musiker_id, formation_id, eintrittsdatum, austrittsdatum)
+            VALUES (?, ?, ?, ?)
+            `,
+            [musikerId, id, ms.eintrittsdatum, safeDateOrNull(ms.austrittsdatum)]
+          );
+        }
+
+        if (oldFotoToDelete && oldFotoToDelete !== fotoPath) deleteFileIfExists(oldFotoToDelete);
+        if (oldMp3ToDelete && oldMp3ToDelete !== mp3Path) deleteFileIfExists(oldMp3ToDelete);
+
+        return { id, foto_path: fotoPath, mp3_path: mp3Path };
+      });
+
+      res.json({ ok: true, formation: result });
+    } catch (e) {
+      cleanupTempFiles(req);
+      res.status(e?.statusCode || 500).json({ ok: false, error: e?.message, code: e?.code });
+    }
+  }
+);
+
+app.delete("/api/formation/:id", requireAuthApi, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return res.status(400).json({ ok: false, error: "Ungültige ID" });
+
+    const result = await withTx(async (conn) => {
+      const [rows] = await conn.query("SELECT foto_path, mp3_path FROM formation WHERE id = ?", [id]);
+      if (!rows.length) throw Object.assign(new Error("Formation nicht gefunden"), { statusCode: 404 });
+      const files = rows[0];
+      await conn.query("DELETE FROM formation WHERE id = ?", [id]);
+      return files;
+    });
+
+    deleteFileIfExists(result.foto_path);
+    deleteFileIfExists(result.mp3_path);
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(e?.statusCode || 500).json({ ok: false, error: e?.message, code: e?.code });
+  }
+});
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : 3000;
 const HOST = "0.0.0.0";

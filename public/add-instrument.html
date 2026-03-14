@@ -11,10 +11,12 @@
     button { padding: 10px 12px; margin-top: 10px; }
     ul { margin: 8px 0 0 18px; }
     .muted { color:#666; }
+    .row-actions { display:inline-flex; gap:8px; margin-left:8px; }
+    .danger { background:#a40000; color:#fff; border:none; }
   </style>
 </head>
 <body>
-  <h1>Instrument erfassen</h1>
+  <h1 id="pageTitle">Instrument erfassen</h1>
   <p class="muted">
     <a href="/">Startseite</a> · <a href="/add-musiker.html">Musiker erfassen</a>
   </p>
@@ -22,7 +24,8 @@
   <form id="form" class="card">
     <label>Instrument-Name *</label>
     <input name="name" required placeholder="z.B. Gesang, Gitarre, Klarinette..." />
-    <button type="submit">Speichern</button>
+    <button type="submit" id="saveBtn">Speichern</button>
+    <button type="button" id="cancelEdit" style="display:none;">Neues Instrument</button>
   </form>
 
   <pre id="out" class="card"></pre>
@@ -35,23 +38,64 @@
 <script>
   const out = document.getElementById("out");
   const list = document.getElementById("list");
+  const form = document.getElementById("form");
+  const params = new URLSearchParams(location.search);
+  let editId = params.get("id");
 
   function esc(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+
+  function renderMode() {
+    const isEdit = !!editId;
+    document.getElementById("pageTitle").textContent = isEdit ? "Instrument bearbeiten" : "Instrument erfassen";
+    document.getElementById("saveBtn").textContent = isEdit ? "Änderungen speichern" : "Speichern";
+    document.getElementById("cancelEdit").style.display = isEdit ? "inline-block" : "none";
+  }
 
   async function refresh() {
     const data = await fetch("/api/instrument").then(r => r.json());
     list.innerHTML = data.length
-      ? data.map(i => `<li>#${i.id} – ${esc(i.name)}</li>`).join("")
+      ? data.map(i => `<li>#${i.id} – ${esc(i.name)} <span class="row-actions"><button type="button" data-edit="${i.id}">Bearbeiten</button><button type="button" class="danger" data-del="${i.id}">Löschen</button></span></li>`).join("")
       : "<li class='muted'>Noch keine Instrumente erfasst</li>";
+
+    list.querySelectorAll("[data-edit]").forEach(btn => btn.addEventListener("click", () => loadForEdit(btn.dataset.edit)));
+    list.querySelectorAll("[data-del]").forEach(btn => btn.addEventListener("click", () => removeItem(btn.dataset.del)));
   }
 
-  document.getElementById("form").addEventListener("submit", async (e) => {
+  async function loadForEdit(id) {
+    const resp = await fetch(`/api/instrument/${encodeURIComponent(id)}`);
+    const json = await resp.json();
+    out.textContent = JSON.stringify(json, null, 2);
+    if (!resp.ok) return;
+    editId = String(id);
+    form.name.value = json.name || "";
+    renderMode();
+    history.replaceState(null, "", `/add-instrument.html?id=${encodeURIComponent(id)}`);
+  }
+
+  async function removeItem(id) {
+    if (!confirm("Dieses Instrument wirklich löschen?")) return;
+    const resp = await fetch(`/api/instrument/${encodeURIComponent(id)}`, { method: "DELETE" });
+    const json = await resp.json();
+    out.textContent = JSON.stringify(json, null, 2);
+    if (resp.ok) {
+      if (String(editId) === String(id)) {
+        editId = null;
+        form.reset();
+        renderMode();
+        history.replaceState(null, "", "/add-instrument.html");
+      }
+      await refresh();
+    }
+  }
+
+  form.addEventListener("submit", async (e) => {
     e.preventDefault();
     out.textContent = "Sende…";
 
     const name = e.target.name.value.trim();
-    const resp = await fetch("/api/instrument", {
-      method: "POST",
+    const isEdit = !!editId;
+    const resp = await fetch(isEdit ? `/api/instrument/${encodeURIComponent(editId)}` : "/api/instrument", {
+      method: isEdit ? "PUT" : "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name })
     });
@@ -60,13 +104,22 @@
     out.textContent = JSON.stringify(json, null, 2);
 
     if (resp.ok) {
-      e.target.reset();
+      if (!isEdit) e.target.reset();
       await refresh();
-      alert("Instrument gespeichert.");
+      alert(isEdit ? "Instrument aktualisiert." : "Instrument gespeichert.");
     }
   });
 
+  document.getElementById("cancelEdit").addEventListener("click", () => {
+    editId = null;
+    form.reset();
+    renderMode();
+    history.replaceState(null, "", "/add-instrument.html");
+  });
+
+  renderMode();
   refresh();
+  if (editId) loadForEdit(editId);
 </script>
 </body>
 </html>

@@ -15,12 +15,15 @@
     table { width:100%; border-collapse: collapse; }
     th, td { border-bottom:1px solid #eee; padding: 8px; vertical-align: top; }
     .muted { color:#666; }
+    .actions { display:flex; gap:10px; flex-wrap:wrap; }
+    .preview { max-width:220px; border-radius:12px; margin-top:8px; display:block; }
+    .danger { background:#a40000; color:#fff; border:none; }
   </style>
 </head>
 <body>
-  <h1>Musiker erfassen</h1>
+  <h1 id="pageTitle">Musiker erfassen</h1>
   <p class="muted"><a href="/">Zur Startseite</a></p>
-  
+
   <form id="form" class="card">
     <div class="row">
       <div>
@@ -49,6 +52,11 @@
 
     <label>Foto (Bilddatei)</label>
     <input type="file" name="foto" accept="image/*" />
+    <div id="fotoArea" style="display:none;">
+      <p class="muted">Aktuelles Foto:</p>
+      <img id="fotoPreview" class="preview" alt="Aktuelles Foto" />
+      <label><input type="checkbox" id="removeFoto" /> Bestehendes Foto entfernen</label>
+    </div>
 
     <div class="card">
       <h2>Instrumente</h2>
@@ -72,7 +80,10 @@
       <button type="button" id="addMs">+ Formation hinzufügen</button>
     </div>
 
-    <button type="submit">Speichern</button>
+    <div class="actions">
+      <button type="submit" id="saveBtn">Speichern</button>
+      <button type="button" id="deleteBtn" class="danger" style="display:none;">Musiker löschen</button>
+    </div>
   </form>
 
   <pre id="out" class="card"></pre>
@@ -81,19 +92,35 @@
   const out = document.getElementById("out");
   const msBody = document.getElementById("mitgliedschaften");
   const selInst = document.getElementById("instrumente");
+  const params = new URLSearchParams(location.search);
+  const editId = params.get("id");
+  const isEdit = !!editId;
   let formationen = [];
 
   function esc(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 
-  async function loadLookups() {
-    formationen = await fetch("/api/lookups/formationen").then(r=>r.json());
-    const instrumente = await fetch("/api/lookups/instrumente").then(r=>r.json());
-
-    selInst.innerHTML = instrumente.map(i => `<option value="${i.id}">${esc(i.name)}</option>`).join("");
-    addMembershipRow(); // eine Zeile als Start
+  function setSelectedValues(select, ids) {
+    const set = new Set((ids || []).map(Number));
+    Array.from(select.options).forEach(o => o.selected = set.has(Number(o.value)));
   }
 
-  function addMembershipRow() {
+  async function loadLookups() {
+    const [formationenData, instrumente] = await Promise.all([
+      fetch("/api/lookups/formationen").then(r=>r.json()),
+      fetch("/api/lookups/instrumente").then(r=>r.json())
+    ]);
+
+    formationen = formationenData;
+    selInst.innerHTML = instrumente.map(i => `<option value="${i.id}">${esc(i.name)}</option>`).join("");
+
+    if (isEdit) {
+      await loadExisting();
+    } else {
+      addMembershipRow();
+    }
+  }
+
+  function addMembershipRow(data = {}) {
     const tr = document.createElement("tr");
     tr.innerHTML = `
       <td>
@@ -106,23 +133,53 @@
       <td><input type="date" class="austritt" /></td>
       <td><button type="button" class="del">Entfernen</button></td>
     `;
+    tr.querySelector(".formation").value = data.id || data.formation_id || "";
+    tr.querySelector(".eintritt").value = data.eintrittsdatum || "";
+    tr.querySelector(".austritt").value = data.austrittsdatum || "";
     tr.querySelector(".del").addEventListener("click", () => tr.remove());
     msBody.appendChild(tr);
   }
 
-  document.getElementById("addMs").addEventListener("click", addMembershipRow);
+  async function loadExisting() {
+    document.getElementById("pageTitle").textContent = "Musiker bearbeiten";
+    document.getElementById("saveBtn").textContent = "Änderungen speichern";
+    document.getElementById("deleteBtn").style.display = "inline-block";
 
-  document.getElementById("form").addEventListener("submit", async (e) => {
+    const res = await fetch(`/api/musiker/${encodeURIComponent(editId)}`);
+    const data = await res.json();
+    if (!res.ok) {
+      out.textContent = JSON.stringify(data, null, 2);
+      return;
+    }
+
+    form.vorname.value = data.vorname || "";
+    form.nachname.value = data.nachname || "";
+    form.geburtsdatum.value = data.geburtsdatum || "";
+    form.todesdatum.value = data.todesdatum || "";
+    form.biografie.value = data.biografie || "";
+    setSelectedValues(selInst, (data.instrumente || []).map(i => i.id));
+
+    msBody.innerHTML = "";
+    (data.formationen || []).forEach(addMembershipRow);
+    if (!data.formationen?.length) addMembershipRow();
+
+    if (data.foto_path) {
+      document.getElementById("fotoArea").style.display = "block";
+      document.getElementById("fotoPreview").src = `/${data.foto_path}`;
+    }
+  }
+
+  document.getElementById("addMs").addEventListener("click", () => addMembershipRow());
+
+  document.getElementById("form")?.addEventListener("submit", async (e) => {
     e.preventDefault();
     out.textContent = "Sende…";
 
     const fd = new FormData(e.target);
 
-    // instrument_ids als JSON
     const instIds = Array.from(selInst.selectedOptions).map(o => Number(o.value));
     fd.append("instrument_ids", JSON.stringify(instIds));
 
-    // formationen als JSON
     const memberships = Array.from(msBody.querySelectorAll("tr")).map(tr => ({
       formation_id: tr.querySelector(".formation").value ? Number(tr.querySelector(".formation").value) : null,
       eintrittsdatum: tr.querySelector(".eintritt").value || null,
@@ -130,18 +187,35 @@
     })).filter(x => x.formation_id && x.eintrittsdatum);
 
     fd.append("formationen", JSON.stringify(memberships));
+    if (document.getElementById("removeFoto").checked) fd.append("remove_foto", "1");
 
-    const resp = await fetch("/api/musiker", { method: "POST", body: fd });
+    const url = isEdit ? `/api/musiker/${encodeURIComponent(editId)}` : "/api/musiker";
+    const method = isEdit ? "PUT" : "POST";
+
+    const resp = await fetch(url, { method, body: fd });
     const json = await resp.json();
     out.textContent = JSON.stringify(json, null, 2);
 
-    if (resp.ok && json?.musiker?.id) {
-      const go = confirm("Erfolgreich gespeichert. Zur Musiker-Ansicht wechseln?");
-      if (go) location.href = `/?type=musiker&id=${json.musiker.id}`;
-      else e.target.reset();
+    if (resp.ok) {
+      const targetId = json?.musiker?.id || editId;
+      const go = confirm(isEdit ? "Änderungen gespeichert. Zur Musiker-Ansicht wechseln?" : "Erfolgreich gespeichert. Zur Musiker-Ansicht wechseln?");
+      if (go) location.href = `/?type=musiker&id=${targetId}`;
+      else if (!isEdit) e.target.reset();
     }
   });
 
+  document.getElementById("deleteBtn").addEventListener("click", async () => {
+    if (!confirm("Diesen Musiker wirklich löschen?")) return;
+    const resp = await fetch(`/api/musiker/${encodeURIComponent(editId)}`, { method: "DELETE" });
+    const json = await resp.json();
+    out.textContent = JSON.stringify(json, null, 2);
+    if (resp.ok) {
+      alert("Musiker gelöscht.");
+      location.href = "/";
+    }
+  });
+
+  const form = document.getElementById("form");
   loadLookups();
 </script>
 </body>

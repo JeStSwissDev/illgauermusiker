@@ -11,21 +11,36 @@
     a { text-decoration: none; }
     ul { margin: 8px 0 0 18px; }
     .muted { color: #666; }
+    .toolbar { display:flex; gap:10px; flex-wrap:wrap; margin-bottom: 12px; }
+    .danger { background:#a40000; color:#fff; border:none; }
+    .admin-links { display:flex; gap:8px; flex-wrap:wrap; margin-top:12px; }
+    button { padding:10px 12px; }
   </style>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 </head>
 <body>
   <h1><a href="/">Musikarchiv Illgau</a></h1>
 
-  <button type="button" id="logoutBtn">Logout</button>
+  <div class="toolbar">
+    <button type="button" id="logoutBtn">Logout</button>
+    <button id="qrBtn" type="button">QR-Code anzeigen</button>
+  </div>
 
-  <button id="qrBtn" style="padding:10px 12px;">QR-Code anzeigen</button>
+  <div id="adminNav" class="card" style="display:none;">
+    <strong>Erfassungsbereich</strong>
+    <div class="admin-links">
+      <a href="/add-musiker.html">Musiker erfassen</a>
+      <a href="/add-formation.html">Formation erfassen</a>
+      <a href="/add-instrument.html">Instrumente verwalten</a>
+      <a href="/add-genre.html">Genres verwalten</a>
+    </div>
+  </div>
 
   <div id="qrWrap" class="card" style="display:none;">
     <h3>QR-Code</h3>
     <div id="qrcode"></div>
     <p class="muted"><span id="qrUrl"></span></p>
-    <button id="qrClose" style="padding:10px 12px;">Schliessen</button>
+    <button id="qrClose" type="button">Schliessen</button>
   </div>
 
   <div id="content" class="card">Lade…</div>
@@ -34,6 +49,7 @@
   const params = new URLSearchParams(location.search);
   const type = params.get("type");
   const id = params.get("id");
+  let isAuthenticated = false;
 
   function linkTo(t, i, label) {
     return `<a href="/?type=${encodeURIComponent(t)}&id=${encodeURIComponent(i)}">${label}</a>`;
@@ -41,6 +57,43 @@
 
   function escapeHtml(s) {
     return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  }
+
+  function adminActionsHtml() {
+    if (!isAuthenticated || !type || !id) return "";
+    const editUrl = type === "musiker"
+      ? `/add-musiker.html?id=${encodeURIComponent(id)}`
+      : `/add-formation.html?id=${encodeURIComponent(id)}`;
+
+    return `
+      <div class="admin-links">
+        <a href="${editUrl}">Bearbeiten</a>
+        <button type="button" class="danger" id="deleteObjectBtn">Löschen</button>
+      </div>
+    `;
+  }
+
+  async function deleteCurrentObject() {
+    if (!type || !id) return;
+    const label = type === "musiker" ? "diesen Musiker" : "diese Formation";
+    if (!confirm(`Willst du ${label} wirklich löschen?`)) return;
+
+    const resp = await fetch(`/api/${type}/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+      credentials: "include"
+    });
+    const json = await resp.json();
+
+    if (resp.ok) {
+      alert("Objekt gelöscht.");
+      location.href = "/";
+    } else {
+      alert(json.error || json.message || "Löschen fehlgeschlagen.");
+    }
+  }
+
+  function bindAdminActions() {
+    document.getElementById("deleteObjectBtn")?.addEventListener("click", deleteCurrentObject);
   }
 
   async function loadStartPage() {
@@ -78,6 +131,7 @@
       const name = `${data.vorname} ${data.nachname}`;
       document.getElementById("content").innerHTML = `
         <h2>${name}</h2>
+        ${adminActionsHtml()}
         ${data.foto_path ? `<img src="/${data.foto_path}" alt="${name}">` : ""}
         ${data.biografie ? `<p>${escapeHtml(data.biografie)}</p>` : ""}
         <p><strong>Geburtsdatum:</strong> ${data.geburtsdatum}</p>
@@ -104,6 +158,7 @@
       const name = data.name;
       document.getElementById("content").innerHTML = `
         <h2>${escapeHtml(name)}</h2>
+        ${adminActionsHtml()}
         ${data.foto_path ? `<img src="/${data.foto_path}" alt="${escapeHtml(name)}">` : ""}
         ${data.biografie ? `<p>${escapeHtml(data.biografie)}</p>` : ""}
         <p><strong>Gründung:</strong> ${data.gruendungsdatum}</p>
@@ -122,6 +177,8 @@
         </div>
       `;
     }
+
+    bindAdminActions();
   }
 
   async function load() {
@@ -131,8 +188,6 @@
     }
     await loadDetailPage();
   }
-
-  load();
 
   const qrBtn = document.getElementById("qrBtn");
   const qrWrap = document.getElementById("qrWrap");
@@ -163,7 +218,7 @@
     try {
       const res = await fetch("/api/logout", {
         method: "POST",
-        credentials: "include" // wichtig für Session-Cookie
+        credentials: "include"
       });
 
       if (res.ok) {
@@ -178,12 +233,16 @@
   });
 
   fetch("/api/me", { credentials: "include" })
-  .then(r => r.json())
-  .then(d => {
-    if (!d.authenticated) {
-      document.getElementById("logoutBtn")?.remove();
-    }
-  });
+    .then(r => r.json())
+    .then(async d => {
+      isAuthenticated = !!d.authenticated;
+      if (!isAuthenticated) {
+        document.getElementById("logoutBtn")?.remove();
+      } else {
+        document.getElementById("adminNav").style.display = "block";
+      }
+      await load();
+    });
 </script>
 </body>
 </html>
