@@ -43,7 +43,7 @@ document.getElementById("loginForm").addEventListener("submit", async (e) => {
 
   if (resp.ok) {
     msg.textContent = "Erfolgreich angemeldet.";
-    location.href = "/add-musiker.html";
+    location.href = "/";
   } else {
     msg.textContent = json.error || "Login fehlgeschlagen.";
   }
