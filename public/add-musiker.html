@@ -15,9 +15,7 @@
     table { width:100%; border-collapse: collapse; }
     th, td { border-bottom:1px solid #eee; padding: 8px; vertical-align: top; }
     .muted { color:#666; }
-    .actions { display:flex; gap:10px; flex-wrap:wrap; }
-    .preview { max-width:220px; border-radius:12px; margin-top:8px; display:block; }
-    .danger { background:#a40000; color:#fff; border:none; }
+    .inline { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
   </style>
 </head>
 <body>
@@ -52,11 +50,10 @@
 
     <label>Foto (Bilddatei)</label>
     <input type="file" name="foto" accept="image/*" />
-    <div id="fotoArea" style="display:none;">
-      <p class="muted">Aktuelles Foto:</p>
-      <img id="fotoPreview" class="preview" alt="Aktuelles Foto" />
-      <label><input type="checkbox" id="removeFoto" /> Bestehendes Foto entfernen</label>
-    </div>
+    <label class="inline" id="removeFotoWrap" hidden>
+      <input type="checkbox" id="removeFoto" style="width:auto; margin:0;" />
+      <span>Bestehendes Foto entfernen</span>
+    </label>
 
     <div class="card">
       <h2>Instrumente</h2>
@@ -80,9 +77,10 @@
       <button type="button" id="addMs">+ Formation hinzufügen</button>
     </div>
 
-    <div class="actions">
+    <div class="inline">
       <button type="submit" id="saveBtn">Speichern</button>
-      <button type="button" id="deleteBtn" class="danger" style="display:none;">Musiker löschen</button>
+      <button type="button" id="cancelBtn" hidden>Abbrechen</button>
+      <button type="button" id="deleteBtn" hidden>Löschen</button>
     </div>
   </form>
 
@@ -90,34 +88,25 @@
 
 <script>
   const out = document.getElementById("out");
+  const form = document.getElementById("form");
   const msBody = document.getElementById("mitgliedschaften");
   const selInst = document.getElementById("instrumente");
-  const params = new URLSearchParams(location.search);
-  const editId = params.get("id");
-  const isEdit = !!editId;
+  const pageTitle = document.getElementById("pageTitle");
+  const saveBtn = document.getElementById("saveBtn");
+  const cancelBtn = document.getElementById("cancelBtn");
+  const deleteBtn = document.getElementById("deleteBtn");
+  const removeFotoWrap = document.getElementById("removeFotoWrap");
+  const removeFoto = document.getElementById("removeFoto");
+  const editId = new URLSearchParams(location.search).get("id");
   let formationen = [];
 
   function esc(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
-
-  function setSelectedValues(select, ids) {
-    const set = new Set((ids || []).map(Number));
-    Array.from(select.options).forEach(o => o.selected = set.has(Number(o.value)));
-  }
+  function asDate(v){ return v ? String(v).slice(0, 10) : ""; }
 
   async function loadLookups() {
-    const [formationenData, instrumente] = await Promise.all([
-      fetch("/api/lookups/formationen").then(r=>r.json()),
-      fetch("/api/lookups/instrumente").then(r=>r.json())
-    ]);
-
-    formationen = formationenData;
+    formationen = await fetch("/api/lookups/formationen").then(r=>r.json());
+    const instrumente = await fetch("/api/lookups/instrumente").then(r=>r.json());
     selInst.innerHTML = instrumente.map(i => `<option value="${i.id}">${esc(i.name)}</option>`).join("");
-
-    if (isEdit) {
-      await loadExisting();
-    } else {
-      addMembershipRow();
-    }
   }
 
   function addMembershipRow(data = {}) {
@@ -133,90 +122,103 @@
       <td><input type="date" class="austritt" /></td>
       <td><button type="button" class="del">Entfernen</button></td>
     `;
-    tr.querySelector(".formation").value = data.id || data.formation_id || "";
-    tr.querySelector(".eintritt").value = data.eintrittsdatum || "";
-    tr.querySelector(".austritt").value = data.austrittsdatum || "";
+    tr.querySelector(".formation").value = data.formation_id ? String(data.formation_id) : "";
+    tr.querySelector(".eintritt").value = asDate(data.eintrittsdatum);
+    tr.querySelector(".austritt").value = asDate(data.austrittsdatum);
     tr.querySelector(".del").addEventListener("click", () => tr.remove());
     msBody.appendChild(tr);
   }
 
-  async function loadExisting() {
-    document.getElementById("pageTitle").textContent = "Musiker bearbeiten";
-    document.getElementById("saveBtn").textContent = "Änderungen speichern";
-    document.getElementById("deleteBtn").style.display = "inline-block";
+  async function loadEditData() {
+    if (!editId) {
+      addMembershipRow();
+      return;
+    }
 
-    const res = await fetch(`/api/musiker/${encodeURIComponent(editId)}`);
-    const data = await res.json();
-    if (!res.ok) {
+    const resp = await fetch(`/api/musiker/${editId}`);
+    const data = await resp.json();
+    if (!resp.ok) {
       out.textContent = JSON.stringify(data, null, 2);
       return;
     }
 
+    pageTitle.textContent = "Musiker bearbeiten";
+    saveBtn.textContent = "Änderungen speichern";
+    cancelBtn.hidden = false;
+    deleteBtn.hidden = false;
+
     form.vorname.value = data.vorname || "";
     form.nachname.value = data.nachname || "";
-    form.geburtsdatum.value = data.geburtsdatum || "";
-    form.todesdatum.value = data.todesdatum || "";
+    form.geburtsdatum.value = asDate(data.geburtsdatum);
+    form.todesdatum.value = asDate(data.todesdatum);
     form.biografie.value = data.biografie || "";
-    setSelectedValues(selInst, (data.instrumente || []).map(i => i.id));
+
+    const instIds = new Set((data.instrumente || []).map(i => String(i.id)));
+    Array.from(selInst.options).forEach(opt => { opt.selected = instIds.has(opt.value); });
 
     msBody.innerHTML = "";
-    (data.formationen || []).forEach(addMembershipRow);
-    if (!data.formationen?.length) addMembershipRow();
-
-    if (data.foto_path) {
-      document.getElementById("fotoArea").style.display = "block";
-      document.getElementById("fotoPreview").src = `/${data.foto_path}`;
+    if (data.formationen?.length) {
+      data.formationen.forEach(f => addMembershipRow({
+        formation_id: f.id,
+        eintrittsdatum: f.eintrittsdatum,
+        austrittsdatum: f.austrittsdatum,
+      }));
+    } else {
+      addMembershipRow();
     }
+
+    removeFotoWrap.hidden = !data.foto_path;
   }
 
   document.getElementById("addMs").addEventListener("click", () => addMembershipRow());
 
-  document.getElementById("form")?.addEventListener("submit", async (e) => {
+  form.addEventListener("submit", async (e) => {
     e.preventDefault();
     out.textContent = "Sende…";
 
-    const fd = new FormData(e.target);
-
+    const fd = new FormData(form);
     const instIds = Array.from(selInst.selectedOptions).map(o => Number(o.value));
-    fd.append("instrument_ids", JSON.stringify(instIds));
+    fd.set("instrument_ids", JSON.stringify(instIds));
 
     const memberships = Array.from(msBody.querySelectorAll("tr")).map(tr => ({
       formation_id: tr.querySelector(".formation").value ? Number(tr.querySelector(".formation").value) : null,
       eintrittsdatum: tr.querySelector(".eintritt").value || null,
       austrittsdatum: tr.querySelector(".austritt").value || null,
     })).filter(x => x.formation_id && x.eintrittsdatum);
+    fd.set("formationen", JSON.stringify(memberships));
+    fd.set("remove_foto", removeFoto.checked ? "1" : "0");
 
-    fd.append("formationen", JSON.stringify(memberships));
-    if (document.getElementById("removeFoto").checked) fd.append("remove_foto", "1");
-
-    const url = isEdit ? `/api/musiker/${encodeURIComponent(editId)}` : "/api/musiker";
-    const method = isEdit ? "PUT" : "POST";
-
+    const url = editId ? `/api/musiker/${editId}` : "/api/musiker";
+    const method = editId ? "PUT" : "POST";
     const resp = await fetch(url, { method, body: fd });
     const json = await resp.json();
     out.textContent = JSON.stringify(json, null, 2);
 
     if (resp.ok) {
-      const targetId = json?.musiker?.id || editId;
-      const go = confirm(isEdit ? "Änderungen gespeichert. Zur Musiker-Ansicht wechseln?" : "Erfolgreich gespeichert. Zur Musiker-Ansicht wechseln?");
-      if (go) location.href = `/?type=musiker&id=${targetId}`;
-      else if (!isEdit) e.target.reset();
+      const id = json?.musiker?.id || editId;
+      const go = confirm(editId ? "Änderungen gespeichert. Zur Musiker-Ansicht wechseln?" : "Erfolgreich gespeichert. Zur Musiker-Ansicht wechseln?");
+      if (go) location.href = `/?type=musiker&id=${id}`;
     }
   });
 
-  document.getElementById("deleteBtn").addEventListener("click", async () => {
+  cancelBtn.addEventListener("click", () => {
+    if (editId) location.href = `/?type=musiker&id=${editId}`;
+    else form.reset();
+  });
+
+  deleteBtn.addEventListener("click", async () => {
+    if (!editId) return;
     if (!confirm("Diesen Musiker wirklich löschen?")) return;
-    const resp = await fetch(`/api/musiker/${encodeURIComponent(editId)}`, { method: "DELETE" });
+    const resp = await fetch(`/api/musiker/${editId}`, { method: "DELETE" });
     const json = await resp.json();
     out.textContent = JSON.stringify(json, null, 2);
-    if (resp.ok) {
-      alert("Musiker gelöscht.");
-      location.href = "/";
-    }
+    if (resp.ok) location.href = "/";
   });
 
-  const form = document.getElementById("form");
-  loadLookups();
+  (async () => {
+    await loadLookups();
+    await loadEditData();
+  })();
 </script>
 </body>
 </html>

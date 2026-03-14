@@ -9,14 +9,15 @@
     .card { border:1px solid #ddd; border-radius: 12px; padding: 16px; margin: 12px 0; }
     input { width: 100%; padding: 10px; margin-top: 6px; }
     button { padding: 10px 12px; margin-top: 10px; }
-    ul { margin: 8px 0 0 18px; }
+    ul { list-style: none; margin: 8px 0 0 0; padding: 0; }
+    li { display:flex; align-items:center; gap:8px; padding:8px 0; border-bottom:1px solid #eee; }
+    .name { flex:1; }
+    .actions { display:flex; gap:8px; flex-shrink:0; }
     .muted { color:#666; }
-    .row-actions { display:inline-flex; gap:8px; margin-left:8px; }
-    .danger { background:#a40000; color:#fff; border:none; }
   </style>
 </head>
 <body>
-  <h1 id="pageTitle">Genre erfassen</h1>
+  <h1>Genre erfassen</h1>
   <p class="muted">
     <a href="/">Startseite</a> · <a href="/add-formation.html">Formation erfassen</a>
   </p>
@@ -25,7 +26,7 @@
     <label>Genre-Name *</label>
     <input name="name" required placeholder="z.B. Volksmusik, Rock, Chor..." />
     <button type="submit" id="saveBtn">Speichern</button>
-    <button type="button" id="cancelEdit" style="display:none;">Neues Genre</button>
+    <button type="button" id="cancelBtn" hidden>Abbrechen</button>
   </form>
 
   <pre id="out" class="card"></pre>
@@ -39,53 +40,53 @@
   const out = document.getElementById("out");
   const list = document.getElementById("list");
   const form = document.getElementById("form");
-  const params = new URLSearchParams(location.search);
-  let editId = params.get("id");
+  const saveBtn = document.getElementById("saveBtn");
+  const cancelBtn = document.getElementById("cancelBtn");
+  let editId = null;
 
   function esc(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 
-  function renderMode() {
-    const isEdit = !!editId;
-    document.getElementById("pageTitle").textContent = isEdit ? "Genre bearbeiten" : "Genre erfassen";
-    document.getElementById("saveBtn").textContent = isEdit ? "Änderungen speichern" : "Speichern";
-    document.getElementById("cancelEdit").style.display = isEdit ? "inline-block" : "none";
+  function resetForm() {
+    editId = null;
+    form.reset();
+    saveBtn.textContent = "Speichern";
+    cancelBtn.hidden = true;
+  }
+
+  async function startEdit(id) {
+    const data = await fetch(`/api/genre/${id}`).then(r => r.json());
+    editId = id;
+    form.name.value = data.name || "";
+    saveBtn.textContent = "Änderungen speichern";
+    cancelBtn.hidden = false;
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  async function removeItem(id, name) {
+    if (!confirm(`Genre „${name}“ wirklich löschen?`)) return;
+    const resp = await fetch(`/api/genre/${id}`, { method: "DELETE" });
+    const json = await resp.json();
+    out.textContent = JSON.stringify(json, null, 2);
+    if (resp.ok) {
+      if (editId === id) resetForm();
+      await refresh();
+      alert("Genre gelöscht.");
+    }
   }
 
   async function refresh() {
     const data = await fetch("/api/genre").then(r => r.json());
     list.innerHTML = data.length
-      ? data.map(g => `<li>#${g.id} – ${esc(g.name)} <span class="row-actions"><button type="button" data-edit="${g.id}">Bearbeiten</button><button type="button" class="danger" data-del="${g.id}">Löschen</button></span></li>`).join("")
+      ? data.map(g => `
+          <li>
+            <div class="actions">
+              <button type="button" data-action="edit" data-id="${g.id}">Bearbeiten</button>
+              <button type="button" data-action="delete" data-id="${g.id}" data-name="${esc(g.name)}">Löschen</button>
+            </div>
+            <div class="name">#${g.id} – ${esc(g.name)}</div>
+          </li>
+        `).join("")
       : "<li class='muted'>Noch keine Genres erfasst</li>";
-
-    list.querySelectorAll("[data-edit]").forEach(btn => btn.addEventListener("click", () => loadForEdit(btn.dataset.edit)));
-    list.querySelectorAll("[data-del]").forEach(btn => btn.addEventListener("click", () => removeItem(btn.dataset.del)));
-  }
-
-  async function loadForEdit(id) {
-    const resp = await fetch(`/api/genre/${encodeURIComponent(id)}`);
-    const json = await resp.json();
-    out.textContent = JSON.stringify(json, null, 2);
-    if (!resp.ok) return;
-    editId = String(id);
-    form.name.value = json.name || "";
-    renderMode();
-    history.replaceState(null, "", `/add-genre.html?id=${encodeURIComponent(id)}`);
-  }
-
-  async function removeItem(id) {
-    if (!confirm("Dieses Genre wirklich löschen?")) return;
-    const resp = await fetch(`/api/genre/${encodeURIComponent(id)}`, { method: "DELETE" });
-    const json = await resp.json();
-    out.textContent = JSON.stringify(json, null, 2);
-    if (resp.ok) {
-      if (String(editId) === String(id)) {
-        editId = null;
-        form.reset();
-        renderMode();
-        history.replaceState(null, "", "/add-genre.html");
-      }
-      await refresh();
-    }
   }
 
   form.addEventListener("submit", async (e) => {
@@ -93,9 +94,11 @@
     out.textContent = "Sende…";
 
     const name = e.target.name.value.trim();
-    const isEdit = !!editId;
-    const resp = await fetch(isEdit ? `/api/genre/${encodeURIComponent(editId)}` : "/api/genre", {
-      method: isEdit ? "PUT" : "POST",
+    const url = editId ? `/api/genre/${editId}` : "/api/genre";
+    const method = editId ? "PUT" : "POST";
+
+    const resp = await fetch(url, {
+      method,
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name })
     });
@@ -104,22 +107,21 @@
     out.textContent = JSON.stringify(json, null, 2);
 
     if (resp.ok) {
-      if (!isEdit) e.target.reset();
+      resetForm();
       await refresh();
-      alert(isEdit ? "Genre aktualisiert." : "Genre gespeichert.");
+      alert("Genre gespeichert.");
     }
   });
 
-  document.getElementById("cancelEdit").addEventListener("click", () => {
-    editId = null;
-    form.reset();
-    renderMode();
-    history.replaceState(null, "", "/add-genre.html");
+  cancelBtn.addEventListener("click", resetForm);
+  list.addEventListener("click", async (e) => {
+    const btn = e.target.closest("button[data-action]");
+    if (!btn) return;
+    const id = Number(btn.dataset.id);
+    if (btn.dataset.action === "edit") await startEdit(id);
+    if (btn.dataset.action === "delete") await removeItem(id, btn.dataset.name || "");
   });
-
-  renderMode();
   refresh();
-  if (editId) loadForEdit(editId);
 </script>
 </body>
 </html>

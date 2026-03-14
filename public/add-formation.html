@@ -15,9 +15,7 @@
     table { width:100%; border-collapse: collapse; }
     th, td { border-bottom:1px solid #eee; padding: 8px; vertical-align: top; }
     .muted { color:#666; }
-    .actions { display:flex; gap:10px; flex-wrap:wrap; }
-    .preview { max-width:220px; border-radius:12px; margin-top:8px; display:block; }
-    .danger { background:#a40000; color:#fff; border:none; }
+    .inline { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
   </style>
 </head>
 <body>
@@ -44,19 +42,17 @@
 
     <label>Foto</label>
     <input type="file" name="foto" accept="image/*" />
-    <div id="fotoArea" style="display:none;">
-      <p class="muted">Aktuelles Foto:</p>
-      <img id="fotoPreview" class="preview" alt="Aktuelles Foto" />
-      <label><input type="checkbox" id="removeFoto" /> Bestehendes Foto entfernen</label>
-    </div>
+    <label class="inline" id="removeFotoWrap" hidden>
+      <input type="checkbox" id="removeFoto" style="width:auto; margin:0;" />
+      <span>Bestehendes Foto entfernen</span>
+    </label>
 
     <label>MP3</label>
     <input type="file" name="mp3" accept="audio/mpeg,audio/mp3" />
-    <div id="mp3Area" style="display:none;">
-      <p class="muted">Aktuelle MP3:</p>
-      <audio id="mp3Preview" controls style="width:100%;"></audio>
-      <label><input type="checkbox" id="removeMp3" /> Bestehende MP3 entfernen</label>
-    </div>
+    <label class="inline" id="removeMp3Wrap" hidden>
+      <input type="checkbox" id="removeMp3" style="width:auto; margin:0;" />
+      <span>Bestehende MP3 entfernen</span>
+    </label>
 
     <div class="card">
       <h2>Genres</h2>
@@ -80,9 +76,10 @@
       <button type="button" id="addMember">+ Musiker hinzufügen</button>
     </div>
 
-    <div class="actions">
+    <div class="inline">
       <button type="submit" id="saveBtn">Speichern</button>
-      <button type="button" id="deleteBtn" class="danger" style="display:none;">Formation löschen</button>
+      <button type="button" id="cancelBtn" hidden>Abbrechen</button>
+      <button type="button" id="deleteBtn" hidden>Löschen</button>
     </div>
   </form>
 
@@ -90,34 +87,27 @@
 
 <script>
   const out = document.getElementById("out");
+  const form = document.getElementById("form");
   const tb = document.getElementById("mitglieder");
   const selGenres = document.getElementById("genres");
-  const params = new URLSearchParams(location.search);
-  const editId = params.get("id");
-  const isEdit = !!editId;
+  const pageTitle = document.getElementById("pageTitle");
+  const saveBtn = document.getElementById("saveBtn");
+  const cancelBtn = document.getElementById("cancelBtn");
+  const deleteBtn = document.getElementById("deleteBtn");
+  const removeFotoWrap = document.getElementById("removeFotoWrap");
+  const removeMp3Wrap = document.getElementById("removeMp3Wrap");
+  const removeFoto = document.getElementById("removeFoto");
+  const removeMp3 = document.getElementById("removeMp3");
+  const editId = new URLSearchParams(location.search).get("id");
   let musiker = [];
 
   function esc(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
-
-  function setSelectedValues(select, ids) {
-    const set = new Set((ids || []).map(Number));
-    Array.from(select.options).forEach(o => o.selected = set.has(Number(o.value)));
-  }
+  function asDate(v){ return v ? String(v).slice(0, 10) : ""; }
 
   async function loadLookups() {
-    const [musikerData, genres] = await Promise.all([
-      fetch("/api/lookups/musiker").then(r=>r.json()),
-      fetch("/api/lookups/genres").then(r=>r.json())
-    ]);
-
-    musiker = musikerData;
+    musiker = await fetch("/api/lookups/musiker").then(r=>r.json());
+    const genres = await fetch("/api/lookups/genres").then(r=>r.json());
     selGenres.innerHTML = genres.map(g => `<option value="${g.id}">${esc(g.name)}</option>`).join("");
-
-    if (isEdit) {
-      await loadExisting();
-    } else {
-      addMemberRow();
-    }
   }
 
   function addMemberRow(data = {}) {
@@ -133,54 +123,63 @@
       <td><input type="date" class="austritt" /></td>
       <td><button type="button" class="del">Entfernen</button></td>
     `;
-    tr.querySelector(".musiker").value = data.id || data.musiker_id || "";
-    tr.querySelector(".eintritt").value = data.eintrittsdatum || "";
-    tr.querySelector(".austritt").value = data.austrittsdatum || "";
+    tr.querySelector(".musiker").value = data.musiker_id ? String(data.musiker_id) : "";
+    tr.querySelector(".eintritt").value = asDate(data.eintrittsdatum);
+    tr.querySelector(".austritt").value = asDate(data.austrittsdatum);
     tr.querySelector(".del").addEventListener("click", () => tr.remove());
     tb.appendChild(tr);
   }
 
-  async function loadExisting() {
-    document.getElementById("pageTitle").textContent = "Formation bearbeiten";
-    document.getElementById("saveBtn").textContent = "Änderungen speichern";
-    document.getElementById("deleteBtn").style.display = "inline-block";
+  async function loadEditData() {
+    if (!editId) {
+      addMemberRow();
+      return;
+    }
 
-    const res = await fetch(`/api/formation/${encodeURIComponent(editId)}`);
-    const data = await res.json();
-    if (!res.ok) {
+    const resp = await fetch(`/api/formation/${editId}`);
+    const data = await resp.json();
+    if (!resp.ok) {
       out.textContent = JSON.stringify(data, null, 2);
       return;
     }
 
+    pageTitle.textContent = "Formation bearbeiten";
+    saveBtn.textContent = "Änderungen speichern";
+    cancelBtn.hidden = false;
+    deleteBtn.hidden = false;
+
     form.name.value = data.name || "";
-    form.gruendungsdatum.value = data.gruendungsdatum || "";
-    form.aufloesungsdatum.value = data.aufloesungsdatum || "";
+    form.gruendungsdatum.value = asDate(data.gruendungsdatum);
+    form.aufloesungsdatum.value = asDate(data.aufloesungsdatum);
     form.biografie.value = data.biografie || "";
-    setSelectedValues(selGenres, (data.genres || []).map(g => g.id));
+
+    const genreIds = new Set((data.genres || []).map(g => String(g.id)));
+    Array.from(selGenres.options).forEach(opt => { opt.selected = genreIds.has(opt.value); });
 
     tb.innerHTML = "";
-    (data.mitglieder || []).forEach(addMemberRow);
-    if (!data.mitglieder?.length) addMemberRow();
+    if (data.mitglieder?.length) {
+      data.mitglieder.forEach(m => addMemberRow({
+        musiker_id: m.id,
+        eintrittsdatum: m.eintrittsdatum,
+        austrittsdatum: m.austrittsdatum,
+      }));
+    } else {
+      addMemberRow();
+    }
 
-    if (data.foto_path) {
-      document.getElementById("fotoArea").style.display = "block";
-      document.getElementById("fotoPreview").src = `/${data.foto_path}`;
-    }
-    if (data.mp3_path) {
-      document.getElementById("mp3Area").style.display = "block";
-      document.getElementById("mp3Preview").src = `/${data.mp3_path}`;
-    }
+    removeFotoWrap.hidden = !data.foto_path;
+    removeMp3Wrap.hidden = !data.mp3_path;
   }
 
   document.getElementById("addMember").addEventListener("click", () => addMemberRow());
 
-  document.getElementById("form").addEventListener("submit", async (e) => {
+  form.addEventListener("submit", async (e) => {
     e.preventDefault();
     out.textContent = "Sende…";
 
-    const fd = new FormData(e.target);
+    const fd = new FormData(form);
     const genreIds = Array.from(selGenres.selectedOptions).map(o => Number(o.value));
-    fd.append("genre_ids", JSON.stringify(genreIds));
+    fd.set("genre_ids", JSON.stringify(genreIds));
 
     const members = Array.from(tb.querySelectorAll("tr")).map(tr => ({
       musiker_id: tr.querySelector(".musiker").value ? Number(tr.querySelector(".musiker").value) : null,
@@ -188,38 +187,41 @@
       austrittsdatum: tr.querySelector(".austritt").value || null,
     })).filter(x => x.musiker_id && x.eintrittsdatum);
 
-    fd.append("mitglieder", JSON.stringify(members));
-    if (document.getElementById("removeFoto").checked) fd.append("remove_foto", "1");
-    if (document.getElementById("removeMp3").checked) fd.append("remove_mp3", "1");
+    fd.set("mitglieder", JSON.stringify(members));
+    fd.set("remove_foto", removeFoto.checked ? "1" : "0");
+    fd.set("remove_mp3", removeMp3.checked ? "1" : "0");
 
-    const url = isEdit ? `/api/formation/${encodeURIComponent(editId)}` : "/api/formation";
-    const method = isEdit ? "PUT" : "POST";
-
+    const url = editId ? `/api/formation/${editId}` : "/api/formation";
+    const method = editId ? "PUT" : "POST";
     const resp = await fetch(url, { method, body: fd });
     const json = await resp.json();
     out.textContent = JSON.stringify(json, null, 2);
 
     if (resp.ok) {
-      const targetId = json?.formation?.id || editId;
-      const go = confirm(isEdit ? "Änderungen gespeichert. Zur Formation-Ansicht wechseln?" : "Erfolgreich gespeichert. Zur Formation-Ansicht wechseln?");
-      if (go) location.href = `/?type=formation&id=${targetId}`;
-      else if (!isEdit) e.target.reset();
+      const id = json?.formation?.id || editId;
+      const go = confirm(editId ? "Änderungen gespeichert. Zur Formation-Ansicht wechseln?" : "Erfolgreich gespeichert. Zur Formation-Ansicht wechseln?");
+      if (go) location.href = `/?type=formation&id=${id}`;
     }
   });
 
-  document.getElementById("deleteBtn").addEventListener("click", async () => {
+  cancelBtn.addEventListener("click", () => {
+    if (editId) location.href = `/?type=formation&id=${editId}`;
+    else form.reset();
+  });
+
+  deleteBtn.addEventListener("click", async () => {
+    if (!editId) return;
     if (!confirm("Diese Formation wirklich löschen?")) return;
-    const resp = await fetch(`/api/formation/${encodeURIComponent(editId)}`, { method: "DELETE" });
+    const resp = await fetch(`/api/formation/${editId}`, { method: "DELETE" });
     const json = await resp.json();
     out.textContent = JSON.stringify(json, null, 2);
-    if (resp.ok) {
-      alert("Formation gelöscht.");
-      location.href = "/";
-    }
+    if (resp.ok) location.href = "/";
   });
 
-  const form = document.getElementById("form");
-  loadLookups();
+  (async () => {
+    await loadLookups();
+    await loadEditData();
+  })();
 </script>
 </body>
 </html>
