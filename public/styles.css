@@ -121,7 +121,14 @@ pre {
 }
 
 ul {
-  padding-left: 1.15rem;
+  list-style: none;
+  margin: 8px 0 0 0;
+  padding: 0;
+}
+
+li {
+  margin: 0;
+  padding: 2px 0;
 }
 
 table {
@@ -153,4 +160,9 @@ audio {
 
 ::selection {
   background: rgba(138, 90, 60, 0.22);
+}
+
+
+.section-gap {
+  margin-top: 28px;
 }
