@@ -1,4 +1,4 @@
-🎵 Musikarchiv Illgau
+🎵 Musikwelt Illgau
 Webanwendung zur Erfassung und Anzeige von Musikern, Formationen, Instrumenten und Genres eines Dorfes — inklusive Mitgliedschaften, Zeiträumen, Fotos, MP3 und QR-Codes.
 
 ✨ Funktionen
