@@ -4,17 +4,18 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Musiker erfassen</title>
+  <link rel="stylesheet" href="/styles.css" />
   <style>
     body { font-family: system-ui, sans-serif; max-width: 980px; margin: 24px auto; padding: 0 16px; }
-    .card { border:1px solid #ddd; border-radius: 12px; padding: 16px; margin: 12px 0; }
+    .card { border:1px solid var(--border); border-radius: 12px; padding: 16px; margin: 12px 0; }
     label { display:block; margin-top: 10px; }
     input, textarea, select { width: 100%; padding: 8px; margin-top: 4px; }
     .row { display:flex; gap: 10px; }
     .row > * { flex:1; }
     button { padding: 10px 12px; }
     table { width:100%; border-collapse: collapse; }
-    th, td { border-bottom:1px solid #eee; padding: 8px; vertical-align: top; }
-    .muted { color:#666; }
+    th, td { border-bottom:1px solid rgba(127, 103, 79, 0.18); padding: 8px; vertical-align: top; }
+    .muted { color:var(--muted); }
     .inline { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
   </style>
 </head>
