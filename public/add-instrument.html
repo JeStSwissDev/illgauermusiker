@@ -6,13 +6,15 @@
   <title>Instrument erfassen</title>
   <link rel="stylesheet" href="/styles.css" />
   <style>
-    body { max-width: 900px; margin: 24px auto; padding: 0 16px; }
-    .card { border-radius: 12px; padding: 16px; margin: 12px 0; }
+    body { font-family: system-ui, sans-serif; max-width: 900px; margin: 24px auto; padding: 0 16px; }
+    .card { border:1px solid var(--border); border-radius: 12px; padding: 16px; margin: 12px 0; }
     input { width: 100%; padding: 10px; margin-top: 6px; }
     button { padding: 10px 12px; margin-top: 10px; }
-    li { display:flex; align-items:center; gap:8px; padding:8px 0; border-bottom:1px solid rgba(217, 210, 198, 0.16); }
+    ul { list-style: none; margin: 8px 0 0 0; padding: 0; }
+    li { display:flex; align-items:center; gap:8px; padding:8px 0; border-bottom:1px solid rgba(127, 103, 79, 0.18); }
     .name { flex:1; }
     .actions { display:flex; gap:8px; flex-shrink:0; }
+    .muted { color:var(--muted); }
   </style>
 </head>
 <body>

@@ -6,10 +6,15 @@
   <title>Musikwelt Illgau</title>
   <link rel="stylesheet" href="/styles.css" />
   <style>
-    body { max-width: 900px; margin: 24px auto; padding: 0 16px; }
-    .card { border-radius: 12px; padding: 16px; margin: 12px 0; }
+    body { font-family: system-ui, sans-serif; max-width: 900px; margin: 24px auto; padding: 0 16px; }
+    .card { border: 1px solid var(--border); border-radius: 12px; padding: 16px; margin: 12px 0; }
     img { max-width: 320px; border-radius: 12px; }
+    a { text-decoration: none; }
+    ul { list-style: none; margin: 8px 0 0 0; padding: 0; }
+    li { padding: 2px 0; }
+    .muted { color: var(--muted); }
     .toolbar { display:flex; gap:10px; flex-wrap:wrap; margin-bottom: 12px; }
+    .danger { background:var(--danger); color:#fff; border:none; }
     .admin-links { display:flex; gap:8px; flex-wrap:wrap; margin-top:12px; }
     button { padding:10px 12px; }
   </style>
@@ -54,6 +59,24 @@
 
   function escapeHtml(s) {
     return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  }
+
+  function formatDate(value) {
+    const iso = value ? String(value).slice(0, 10) : "";
+    if (!iso) return "";
+    const [y, m, d] = iso.split("-").map(Number);
+    const date = new Date(y, m - 1, d);
+    return new Intl.DateTimeFormat("de-CH", {
+      day: "numeric",
+      month: "long",
+      year: "numeric"
+    }).format(date);
+  }
+
+  function formatDateRange(from, to) {
+    const start = formatDate(from);
+    if (!start) return to ? formatDate(to) : "";
+    return `${start}${to ? " – " + formatDate(to) : " – aktiv"}`;
   }
 
   function adminActionsHtml() {
@@ -108,7 +131,7 @@
         ? `<ul>${formationen.map(f => `<li>${linkTo("formation", f.id, escapeHtml(f.name))}</li>`).join("")}</ul>`
         : `<p class="muted">Keine Formationen erfasst</p>`}
 
-      <h2>Musiker</h2>
+      <h2 class="section-gap">Musiker</h2>
       ${musiker?.length
         ? `<ul>${musiker.map(m => `<li>${linkTo("musiker", m.id, escapeHtml(m.nachname + " " + m.vorname))}</li>`).join("")}</ul>`
         : `<p class="muted">Keine Musiker erfasst</p>`}
@@ -131,8 +154,8 @@
         ${adminActionsHtml()}
         ${data.foto_path ? `<img src="/${data.foto_path}" alt="${name}">` : ""}
         ${data.biografie ? `<p>${escapeHtml(data.biografie)}</p>` : ""}
-        <p><strong>Geburtsdatum:</strong> ${data.geburtsdatum}</p>
-        ${data.todesdatum ? `<p><strong>Todesdatum:</strong> ${data.todesdatum}</p>` : ""}
+        <p><strong>Geburtsdatum:</strong> ${formatDate(data.geburtsdatum)}</p>
+        ${data.todesdatum ? `<p><strong>Todesdatum:</strong> ${formatDate(data.todesdatum)}</p>` : ""}
 
         <div class="card">
           <h3>Instrumente</h3>
@@ -141,7 +164,7 @@
 
         <div class="card">
           <h3>Formationen</h3>
-          ${data.formationen?.length ? `<ul>${data.formationen.map(f => `<li>${linkTo("formation", f.id, escapeHtml(f.name))} <span class="muted">(${f.eintrittsdatum}${f.austrittsdatum ? " – " + f.austrittsdatum : " – aktiv"})</span></li>`).join("")}</ul>` : "<p class='muted'>Keine erfasst</p>"}
+          ${data.formationen?.length ? `<ul>${data.formationen.map(f => `<li>${linkTo("formation", f.id, escapeHtml(f.name))} <span class="muted">(${formatDateRange(f.eintrittsdatum, f.austrittsdatum)})</span></li>`).join("")}</ul>` : "<p class='muted'>Keine erfasst</p>"}
         </div>
 
         <div class="card">
@@ -158,8 +181,8 @@
         ${adminActionsHtml()}
         ${data.foto_path ? `<img src="/${data.foto_path}" alt="${escapeHtml(name)}">` : ""}
         ${data.biografie ? `<p>${escapeHtml(data.biografie)}</p>` : ""}
-        <p><strong>Gründung:</strong> ${data.gruendungsdatum}</p>
-        ${data.aufloesungsdatum ? `<p><strong>Auflösung:</strong> ${data.aufloesungsdatum}</p>` : ""}
+        <p><strong>Gründung:</strong> ${formatDate(data.gruendungsdatum)}</p>
+        ${data.aufloesungsdatum ? `<p><strong>Auflösung:</strong> ${formatDate(data.aufloesungsdatum)}</p>` : ""}
 
         ${data.mp3_path ? `<audio controls src="/${data.mp3_path}" style="width:100%"></audio>` : ""}
 
@@ -170,7 +193,7 @@
 
         <div class="card">
           <h3>Mitglieder</h3>
-          ${data.mitglieder?.length ? `<ul>${data.mitglieder.map(m => `<li>${linkTo("musiker", m.id, escapeHtml(m.vorname + " " + m.nachname))} <span class="muted">(${m.eintrittsdatum}${m.austrittsdatum ? " – " + m.austrittsdatum : " – aktiv"})</span></li>`).join("")}</ul>` : "<p class='muted'>Keine erfasst</p>"}
+          ${data.mitglieder?.length ? `<ul>${data.mitglieder.map(m => `<li>${linkTo("musiker", m.id, escapeHtml(m.vorname + " " + m.nachname))} <span class="muted">(${formatDateRange(m.eintrittsdatum, m.austrittsdatum)})</span></li>`).join("")}</ul>` : "<p class='muted'>Keine erfasst</p>"}
         </div>
       `;
     }
