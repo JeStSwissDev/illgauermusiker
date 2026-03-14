@@ -263,6 +263,70 @@
       }
       await load();
     });
+
+  (function () {
+    const navKey = "mw-illgau-nav-direction";
+
+    function getNavDirection(urlString) {
+      const url = new URL(urlString, location.href);
+
+      if (url.origin !== location.origin) return "";
+
+      const type = url.searchParams.get("type");
+      const id = url.searchParams.get("id");
+
+      if (url.pathname === "/" && type === "formation" && id) return "left";
+      if (url.pathname === "/" && type === "musiker" && id) return "right";
+      if (
+        url.pathname === "/" &&
+        !type &&
+        !id &&
+        (location.pathname !== "/" || location.search)
+      ) return "up";
+
+      return "";
+    }
+
+    document.addEventListener("DOMContentLoaded", () => {
+      const dir = sessionStorage.getItem(navKey);
+
+      if (dir === "left") {
+        document.body.classList.add("page-enter-from-right");
+      } else if (dir === "right") {
+        document.body.classList.add("page-enter-from-left");
+      } else if (dir === "up") {
+        document.body.classList.add("page-enter-from-bottom");
+      }
+
+      sessionStorage.removeItem(navKey);
+    });
+
+    document.addEventListener("click", (e) => {
+      const a = e.target.closest("a");
+      if (!a) return;
+      if (!a.href) return;
+      if (a.target === "_blank") return;
+      if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+      if (a.hasAttribute("download")) return;
+
+      const dir = getNavDirection(a.href);
+      if (!dir) return;
+
+      e.preventDefault();
+
+      let exitClass = "";
+      if (dir === "left") exitClass = "page-exit-left";
+      if (dir === "right") exitClass = "page-exit-right";
+      if (dir === "up") exitClass = "page-exit-up";
+
+      sessionStorage.setItem(navKey, dir);
+      document.body.classList.add(exitClass);
+
+      setTimeout(() => {
+        location.href = a.href;
+      }, 300);
+    });
+  })();
 </script>
 </body>
 </html>

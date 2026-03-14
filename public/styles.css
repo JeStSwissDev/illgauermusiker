@@ -166,3 +166,59 @@ audio {
 .section-gap {
   margin-top: 28px;
 }
+
+/* ===== Page Slide Transition ===== */
+
+.page-enter-from-left {
+  animation: pageEnterFromLeft .35s ease both;
+}
+
+.page-enter-from-right {
+  animation: pageEnterFromRight .35s ease both;
+}
+
+.page-enter-from-bottom {
+  animation: pageEnterFromBottom .35s ease both;
+}
+
+.page-exit-left {
+  animation: pageExitLeft .35s ease both;
+}
+
+.page-exit-right {
+  animation: pageExitRight .35s ease both;
+}
+
+.page-exit-up {
+  animation: pageExitUp .35s ease both;
+}
+
+@keyframes pageEnterFromLeft {
+  from { opacity: 0; transform: translateX(-40px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes pageEnterFromRight {
+  from { opacity: 0; transform: translateX(40px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes pageEnterFromBottom {
+  from { opacity: 0; transform: translateY(40px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes pageExitLeft {
+  from { opacity: 1; transform: translateX(0); }
+  to   { opacity: 0; transform: translateX(-40px); }
+}
+
+@keyframes pageExitRight {
+  from { opacity: 1; transform: translateX(0); }
+  to   { opacity: 0; transform: translateX(40px); }
+}
+
+@keyframes pageExitUp {
+  from { opacity: 1; transform: translateY(0); }
+  to   { opacity: 0; transform: translateY(-40px); }
+}
