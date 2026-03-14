@@ -6,16 +6,15 @@
   <title>Musiker erfassen</title>
   <link rel="stylesheet" href="/styles.css" />
   <style>
-    body { font-family: system-ui, sans-serif; max-width: 980px; margin: 24px auto; padding: 0 16px; }
-    .card { border:1px solid var(--border); border-radius: 12px; padding: 16px; margin: 12px 0; }
+    body { max-width: 980px; margin: 24px auto; padding: 0 16px; }
+    .card { border-radius: 12px; padding: 16px; margin: 12px 0; }
     label { display:block; margin-top: 10px; }
     input, textarea, select { width: 100%; padding: 8px; margin-top: 4px; }
     .row { display:flex; gap: 10px; }
     .row > * { flex:1; }
     button { padding: 10px 12px; }
     table { width:100%; border-collapse: collapse; }
-    th, td { border-bottom:1px solid rgba(127, 103, 79, 0.18); padding: 8px; vertical-align: top; }
-    .muted { color:var(--muted); }
+    th, td { padding: 8px; vertical-align: top; }
     .inline { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
   </style>
 </head>
@@ -38,11 +37,11 @@
     <div class="row">
       <div>
         <label>Geburtsdatum *</label>
-        <input type="text" name="geburtsdatum" required placeholder="TT.MM.JJJJ" />
+        <input type="date" name="geburtsdatum" required />
       </div>
       <div>
         <label>Todesdatum</label>
-        <input type="text" name="todesdatum" placeholder="TT.MM.JJJJ" />
+        <input type="date" name="todesdatum" />
       </div>
     </div>
 
@@ -100,48 +99,9 @@
   const removeFoto = document.getElementById("removeFoto");
   const editId = new URLSearchParams(location.search).get("id");
   let formationen = [];
-  bindDateField(form.geburtsdatum);
-  bindDateField(form.todesdatum);
 
   function esc(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
-
   function asDate(v){ return v ? String(v).slice(0, 10) : ""; }
-  function isoToDisplay(v) {
-    const iso = asDate(v);
-    if (!iso) return "";
-    const [y, m, d] = iso.split("-");
-    return [d, m, y].join(".");
-  }
-  function displayToIso(v) {
-    const value = String(v || "").trim();
-    if (!value) return "";
-    if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
-    const m = value.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})$/);
-    if (!m) return "";
-    const day = m[1].padStart(2, "0");
-    const month = m[2].padStart(2, "0");
-    return `${m[3]}-${month}-${day}`;
-  }
-  function setDateField(input, value) {
-    input.value = isoToDisplay(value);
-  }
-  function getDateField(input) {
-    return displayToIso(input.value);
-  }
-  function bindDateField(input) {
-    input.setAttribute("placeholder", "TT.MM.JJJJ");
-    input.setAttribute("inputmode", "numeric");
-    input.addEventListener("blur", () => {
-      const iso = getDateField(input);
-      if (input.value && !iso) {
-        input.setCustomValidity("Bitte Datum im Format TT.MM.JJJJ eingeben.");
-      } else {
-        input.setCustomValidity("");
-        if (iso) input.value = isoToDisplay(iso);
-      }
-    });
-    input.addEventListener("input", () => input.setCustomValidity(""));
-  }
 
   async function loadLookups() {
     formationen = await fetch("/api/lookups/formationen").then(r=>r.json());
@@ -158,15 +118,13 @@
           ${formationen.map(f => `<option value="${f.id}">${esc(f.name)}</option>`).join("")}
         </select>
       </td>
-      <td><input type="text" class="eintritt date-input" placeholder="TT.MM.JJJJ" /></td>
-      <td><input type="text" class="austritt date-input" placeholder="TT.MM.JJJJ" /></td>
+      <td><input type="date" class="eintritt" /></td>
+      <td><input type="date" class="austritt" /></td>
       <td><button type="button" class="del">Entfernen</button></td>
     `;
     tr.querySelector(".formation").value = data.formation_id ? String(data.formation_id) : "";
-    bindDateField(tr.querySelector(".eintritt"));
-    bindDateField(tr.querySelector(".austritt"));
-    setDateField(tr.querySelector(".eintritt"), data.eintrittsdatum);
-    setDateField(tr.querySelector(".austritt"), data.austrittsdatum);
+    tr.querySelector(".eintritt").value = asDate(data.eintrittsdatum);
+    tr.querySelector(".austritt").value = asDate(data.austrittsdatum);
     tr.querySelector(".del").addEventListener("click", () => tr.remove());
     msBody.appendChild(tr);
   }
@@ -191,8 +149,8 @@
 
     form.vorname.value = data.vorname || "";
     form.nachname.value = data.nachname || "";
-    setDateField(form.geburtsdatum, data.geburtsdatum);
-    setDateField(form.todesdatum, data.todesdatum);
+    form.geburtsdatum.value = asDate(data.geburtsdatum);
+    form.todesdatum.value = asDate(data.todesdatum);
     form.biografie.value = data.biografie || "";
 
     const instIds = new Set((data.instrumente || []).map(i => String(i.id)));
@@ -216,27 +174,16 @@
 
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
-
-    const requiredDatesOk = getDateField(form.geburtsdatum);
-    const optionalDateOk = !form.todesdatum.value || getDateField(form.todesdatum);
-    if (!requiredDatesOk || !optionalDateOk) {
-      out.textContent = "Bitte Datumsfelder im Format TT.MM.JJJJ ausfüllen.";
-      form.reportValidity();
-      return;
-    }
-
     out.textContent = "Sende…";
 
     const fd = new FormData(form);
-    fd.set("geburtsdatum", getDateField(form.geburtsdatum));
-    fd.set("todesdatum", getDateField(form.todesdatum));
     const instIds = Array.from(selInst.selectedOptions).map(o => Number(o.value));
     fd.set("instrument_ids", JSON.stringify(instIds));
 
     const memberships = Array.from(msBody.querySelectorAll("tr")).map(tr => ({
       formation_id: tr.querySelector(".formation").value ? Number(tr.querySelector(".formation").value) : null,
-      eintrittsdatum: getDateField(tr.querySelector(".eintritt")) || null,
-      austrittsdatum: getDateField(tr.querySelector(".austritt")) || null,
+      eintrittsdatum: tr.querySelector(".eintritt").value || null,
+      austrittsdatum: tr.querySelector(".austritt").value || null,
     })).filter(x => x.formation_id && x.eintrittsdatum);
     fd.set("formationen", JSON.stringify(memberships));
     fd.set("remove_foto", removeFoto.checked ? "1" : "0");
